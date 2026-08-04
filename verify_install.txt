@@ -1,0 +1,8 @@
+▶ 自动探测安装模式：SfxEfx
+✓ 快照已保存：C:\ProgramData\VxAPO\snapshots\{3b1c3cb8-af9e-47b9-b776-3dac8c7ca333}.json
+✓ 已安装 {3b1c3cb8-af9e-47b9-b776-3dac8c7ca333}（模式 SfxEfx，子 APO 保留=true）
+--- config.txt (C:\ProgramData\VxAPO\{3b1c3cb8-af9e-47b9-b776-3dac8c7ca333}\config.txt) ---
+
+✓ 文件可读回（0 字节）
+  ♻ 重启音频服务（audiosrv）…
+  ♻ 音频服务已重启

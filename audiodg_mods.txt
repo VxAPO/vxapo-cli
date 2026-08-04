@@ -1,0 +1,6 @@
+audiodg PID: 26348
+--- VxAPO ---
+D:\APO_Project\VxAPO\vxapo-driver\target\x86_64-pc-windows-msvc\debug\vxapo_driver.dll
+--- EAPO ---
+D:\Equalizer APO\EqualizerAPO.dll
+--- done ---

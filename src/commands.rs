@@ -377,6 +377,13 @@ pub fn install(device_ref: &str, mode: Option<&str>, no_child: bool) -> Result<(
         auto_register_driver()?;
     }
 
+    // 写死 DisableProtectedAudioDG=1（audiodg 在创建 APO 实例前检查——LockForProcess
+    // 的 ensure_can_load 太晚，实例已被拒）。EAPO 装/卸会改此值，必须安装时强制写。
+    // 2026-08-04 实测：EAPO 存在时（写入该值）VxAPO 子 APO 能加载；EAPO 卸载后
+    // 值被恢复 → VxAPO 独立父槽位被 audiodg 拒（DLL 不加载）。
+    vxapo_driver::install::audiodg::disable()
+        .map_err(|e| format!("写入 DisableProtectedAudioDG 失败：{e}"))?;
+
     ensure_can_load().map_err(|e| format!("audiodg 检查失败：{e}"))?;
     install_endpoint(&dev.guid, &dev.name, &dev.connection, &config, true)
         .map_err(|e| format!("install_endpoint 失败：{e}（可用 vxapo-cli snapshot diff -d {guid} 查看变更）", guid = dev.guid))?;
