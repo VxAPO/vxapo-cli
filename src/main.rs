@@ -246,7 +246,11 @@ fn driver_device_menu(dev_idx: &usize) {
                 }
             }
             "s" => {
-                let _ = commands::list_devices();
+                // 单设备状态：槽位 + childApo 信息区（用户要求——只显示当前设备）。
+                match commands::show_device_status(&dev_idx.to_string()) {
+                    Ok(()) => {}
+                    Err(e) => println!("✗ {e}"),
+                }
             }
             input => {
                 // 子命令直通：菜单内可直接执行子命令（交互与子命令结合）。

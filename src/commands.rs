@@ -99,6 +99,56 @@ pub fn require_admin() -> Result<(), String> {
     }
 }
 
+/// 单设备状态详情（交互菜单 [s] 用）：只显示指定设备的槽位 + 子 APO 信息。
+///
+/// 与 `list_devices` 不同——本函数聚焦单个设备，并展示 childApo 信息区
+/// （PreMixChild/PostMixChild，运行期委托给谁）。
+pub fn show_device_status(device_ref: &str) -> Result<(), String> {
+    let dev = resolve_device(device_ref)?;
+    let devices = enumerate_devices().map_err(|e| format!("枚举设备失败：{e}"))?;
+    let d = devices
+        .iter()
+        .find(|d| d.endpoint.as_ref().map(|e| e.endpoint_guid.eq_ignore_ascii_case(&dev.guid)).unwrap_or(false))
+        .ok_or_else(|| "设备不在枚举列表".to_string())?;
+    let ep = d.endpoint.as_ref().unwrap();
+    println!("[{}]", ep.friendly_name);
+    println!("  GUID: {}", ep.endpoint_guid);
+    println!("  版本: {}  模式: {:?}", d.installed_version, d.install_mode);
+    // 5 槽位占用（友好名）
+    let slot_names = ["LFX", "GFX", "SFX", "MFX", "EFX"];
+    for (s, val) in d.slots.iter().enumerate() {
+        let label = match val {
+            vxapo_driver::install::device::slots::SlotValue::Guid(g) => {
+                let gs = format!("{g:?}");
+                slot_friendly(&gs).unwrap_or_else(|| gs.clone())
+            }
+            _ => "-".to_string(),
+        };
+        println!("  {}[{}]: {label}", slot_names[s], s);
+    }
+    // EAPO 状态
+    if let Some(eapo) = detect_eapo_status(&d.slots) {
+        println!("  ▶ {eapo}");
+    }
+    // childApo 信息区（子 APO：VxAPO 运行时委托给谁）
+    println!("  子 APO：");
+    let child_pre = read_child_apo_guid(&ep.endpoint_guid, ChildApoKind::PreMix)
+        .map(|g| slot_friendly(&format!("{g:?}")).unwrap_or_else(|| format!("{g:?}")))
+        .unwrap_or_else(|| "-".to_string());
+    let child_post = read_child_apo_guid(&ep.endpoint_guid, ChildApoKind::PostMix)
+        .map(|g| slot_friendly(&format!("{g:?}")).unwrap_or_else(|| format!("{g:?}")))
+        .unwrap_or_else(|| "-".to_string());
+    println!("    PreMixChild: {child_pre}");
+    println!("    PostMixChild: {child_post}");
+    // 槽位失守检测（仅存 lib/childapo 键时验证）
+    if child_apo_key_exists(&ep.endpoint_guid) {
+        if let Some(lost) = detect_lost_slot(&d.slots, d.install_mode) {
+            println!("  ⚠ 槽位失守：{lost} 已被接管，需重装（install）");
+        }
+    }
+    Ok(())
+}
+
 /// 打印设备列表 + 槽位占用（包含 4.5 友好名 + 槽位失守标注，CLI 引用规范 5.2 status/list）。
 pub fn list_devices() -> Result<(), String> {
     let devices = enumerate_devices().map_err(|e| format!("枚举设备失败：{e}"))?;
