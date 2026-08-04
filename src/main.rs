@@ -199,7 +199,7 @@ fn driver_device_menu(dev_idx: &usize) {
                 exit_to_mode = true;
                 break;
             }
-            "i" => install_guide(&dev, *dev_idx),
+            "i" => install_and_guide(&dev, *dev_idx),
             "u" => {
                 match commands::uninstall(&dev.guid) {
                     Ok(()) => println!("✓ 卸载完成"),
@@ -232,7 +232,35 @@ fn driver_device_menu(dev_idx: &usize) {
             "s" => {
                 let _ = commands::list_devices();
             }
-            _ => println!("未知输入（i/u/c/p/r/x/s/b/exit）"),
+            input => {
+                // 子命令直通：菜单内可直接执行子命令（交互与子命令结合）。
+                // 兼容两种输入：直接打 `install -d 0`，或粘贴 `vxapo-cli install -d 0`（剥前缀）。
+                let line = input.trim();
+                let line = line
+                    .strip_prefix("vxapo-cli")
+                    .map(str::trim)
+                    .unwrap_or(line);
+                let args: Vec<String> = line
+                    .split_whitespace()
+                    .map(|s| s.to_string())
+                    .collect();
+                if args.is_empty() {
+                    println!("未知输入（i/u/c/p/r/x/s/b/exit，或直接打子命令如 install -d {dev_idx}）");
+                } else {
+                    let known = matches!(
+                        args[0].as_str(),
+                        "install" | "uninstall" | "config" | "snapshot" | "list" | "status" | "help"
+                    );
+                    if known {
+                        let code = run_subcommand(&args);
+                        if code != 0 {
+                            println!("  子命令执行失败（退出码 {code}）。可用 help 查看用法。");
+                        }
+                    } else {
+                        println!("未知输入：{input}（支持 i/u/c/p/r/x/s/b/exit，或直接打子命令如 install -d {dev_idx}）");
+                    }
+                }
+            }
         }
     }
     if exit_to_mode {
@@ -240,32 +268,24 @@ fn driver_device_menu(dev_idx: &usize) {
     }
 }
 
-/// 安装指引（交互模式）：按 i 后给出该设备的子命令用法 + config.txt 导入提示。
-///
-/// 枚举层已把序号与 GUID 对应（list 每设备行 [index] + GUID），这里指引用户
-/// 用**序号**直接打子命令——「子命令与交互功能结合」：交互用来查列表/确认对应关系，
-/// 安装本身永远是子命令行为，不做误导性的「确认安装」交互。
-fn install_guide(dev: &commands::DeviceRef, dev_idx: usize) {
-    println!("\n--- 安装指引：{dev_name} ---", dev_name = dev.name);
-    println!("  本设备序号：[{dev_idx}]     GUID：{guid}", guid = dev.guid);
-    println!("  安装到本设备，直接执行子命令：【用序号即可，无需复制 GUID】");
-    println!();
-    println!("  vxapo-cli install -d {dev_idx}");
-    println!("  # 指定模式：");
-    println!("  vxapo-cli install -d {dev_idx} --mode LfxGfx|SfxMfx|SfxEfx");
-    println!("  # 不保留现有 APO（覆盖）：加 --no-child");
-    println!("  vxapo-cli install -d {dev_idx} --no-child");
-    println!();
-    println!("  卸载：vxapo-cli uninstall -d {dev_idx}");
-    println!();
-    // config.txt 导入提示（P0-3 per-device 配置，调音效果必需）。
-    println!("  ⚠ 调音效果需要 config.txt——安装后必须导入 DSP 配置：");
-    println!("  vxapo-cli config set -d {dev_idx} -f <你的config.txt路径>");
-    println!("  # 查看当前设备是否已配置：");
-    println!("  vxapo-cli config show -d {dev_idx}");
-    println!();
-    println!("  [b] 返回设备列表");
-    let _ = read_line();
+/// 安装并引导（交互模式）：按 i 直接执行默认安装（SfxEfx + 保留子 APO），
+/// 完成后提示菜单内如何导入 config.txt 调音配置（config set 可在本菜单直接输入）。
+fn install_and_guide(dev: &commands::DeviceRef, dev_idx: usize) {
+    println!("  正在安装到 [{dev_idx}] {}…", dev.name);
+    match commands::install(&dev.guid, None, false) {
+        Ok(()) => {
+            println!("✓ 安装完成（模式 SfxEfx）。");
+            println!("  调音：导入 config.txt（在本菜单直接输入下列命令即可）：");
+            println!("    config set -d {dev_idx} -f <你的config.txt路径>");
+            println!("  查看是否已配置：config show -d {dev_idx}");
+        }
+        Err(e) => {
+            println!("✗ 安装失败：{e}");
+            println!(
+                "  可在本菜单直接输入带参数重试：install -d {dev_idx} --mode LfxGfx|SfxMfx|SfxEfx [--no-child]"
+            );
+        }
+    }
 }
 
 /// 配置子菜单：config show / config set。
