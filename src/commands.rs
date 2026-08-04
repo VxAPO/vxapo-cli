@@ -440,23 +440,42 @@ pub fn uninstall(device_ref: &str) -> Result<(), String> {
     if !snapshot_exists(&dev.guid) {
         return Err("无基线可对比——快照不存在（先 install 建立基线）".to_string());
     }
-    // 卸载前停音频服务：audiodg 持有点端会锁 MMDevices 槽位值，不停服务槽位删不掉。
-    println!("  ♻ 停止音频服务（卸载前置）…");
-    let stop = std::process::Command::new("net")
+    // 卸载前确保 audiodg 进程退出：audiodg 持有点端会**锁 MMDevices 槽位键句柄**，
+    // 单靠 net stop 不可靠（3521=服务本就没跑但进程残留，实测第一次卸载槽位删不掉）。
+    // 强杀 audiodg 立即释放句柄，保证槽位值可删。
+    println!("  ♻ 停止音频服务 + 终止 audiodg（卸载前置）…");
+    let _ = std::process::Command::new("net")
         .args(["stop", "audiosrv"])
-        .output()
-        .map_err(|e| format!("net stop audiosrv 执行失败：{e}"))?;
-    if !stop.status.success() {
-        println!("  （net stop 返回非零：{}，继续）", String::from_utf8_lossy(&stop.stderr).trim());
-    }
+        .output();
+    let _ = std::process::Command::new("taskkill")
+        .args(["/f", "/im", "audiodg.exe"])
+        .output();
     std::thread::sleep(std::time::Duration::from_millis(1500));
 
-    // 卸载（服务已停 → 槽位值删除不被锁）。
+    // 卸载（audiodg 已退出 → 槽位值删除不被锁）。
     if let Err(e) = uninstall_endpoint(&dev.guid) {
         // 卸载失败也要尝试恢复音频服务。
         let _ = std::process::Command::new("net").args(["start", "audiosrv"]).output();
         return Err(format!("uninstall_endpoint 失败：{e}"));
     }
+
+    // 卸载后回读验证：5 槽位中不应残留 VxAPO CLSID。
+    let residual = enumerate_devices()
+        .map_err(|e| format!("回读枚举失败：{e}"))?
+        .iter()
+        .find(|d| d.endpoint.as_ref().map(|e| e.endpoint_guid.eq_ignore_ascii_case(&dev.guid)).unwrap_or(false))
+        .map(|d| {
+            d.slots.iter().filter(|s| {
+                matches!(s, vxapo_driver::install::device::slots::SlotValue::Guid(g)
+                    if *g == CLSID_VXAPO_PRE_MIX || *g == CLSID_VXAPO_POST_MIX)
+            }).count()
+        })
+        .unwrap_or(0);
+    if residual > 0 {
+        let _ = std::process::Command::new("net").args(["start", "audiosrv"]).output();
+        return Err(format!("卸载后检测到 {residual} 个槽位残留 VxAPO CLSID——音频进程可能仍占用，请重试。"));
+    }
+
     print!("✓ 已卸载 {}。", dev.guid);
     if let Ok(diff) = snapshot_diff(&dev.guid) {
         println!(" 变更统计：{diff}");
