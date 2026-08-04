@@ -293,14 +293,40 @@ pub fn install(device_ref: &str, mode: Option<&str>, no_child: bool) -> Result<(
         .map_err(|e| format!("install_endpoint 失败：{e}（可用 vxapo-cli snapshot diff -d {guid} 查看变更）", guid = dev.guid))?;
     println!("✓ 已安装 {}（模式 {:?}，子 APO 保留={}）", dev.guid, config.install_mode, !no_child);
 
-    // per-device config.txt 检查（P0-3 配置入口）：缺失时明确提示用户补写 DSP 配置，
-    // 避免「装完发现没配置」——config 写归 CLI（config set），不阻塞安装（默认无配置可运行）。
+    // per-device config.txt 检查（P0-3 配置入口）：缺失时**自动从 exe 同级 .\config.txt 导入**，
+    // 避免「装完发现没配置」。约定：把 config.txt 放在 vxapo-cli.exe 同目录即可，
+    // 安装自动复制到 Documents\VxAPO\{guid}\config.txt 供 APO 解析。config 写归 CLI（非 driver）。
     match config_show(&dev.guid) {
         Ok(()) => {}
         Err(_) => {
             let path = config_path(&dev.guid).unwrap_or_default();
-            println!("⚠ 未检测到 config.txt（{path}），APO 将按无配置运行。");
-            println!("   请用 config set 写入：vxapo-cli config set -d <device> -f <你的配置文件>");
+            // 自动导入：exe 同级 config.txt（默认约定）。
+            let exe_dir = std::env::current_exe()
+                .ok()
+                .and_then(|p| p.parent().map(|p| p.to_path_buf()))
+                .unwrap_or_default();
+            let default_src = exe_dir.join("config.txt");
+            if default_src.exists() {
+                match std::fs::read_to_string(&default_src) {
+                    Ok(src) => {
+                        if let Some(parent) = Path::new(&path).parent() {
+                            let _ = std::fs::create_dir_all(parent);
+                        }
+                        match std::fs::write(&path, &src) {
+                            Ok(()) => println!(
+                                "📄 已自动导入 {} → {}",
+                                default_src.display(),
+                                path
+                            ),
+                            Err(e) => println!("⚠ 自动导入失败：{e}"),
+                        }
+                    }
+                    Err(e) => println!("⚠ 读取 {} 失败：{e}", default_src.display()),
+                }
+            } else {
+                println!("⚠ 未检测到 config.txt（{path}），APO 将按无配置运行。");
+                println!("   请用 config set 写入：vxapo-cli config set -d <device> -f <你的配置文件>");
+            }
         }
     }
     Ok(())
