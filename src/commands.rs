@@ -325,9 +325,6 @@ pub fn install(device_ref: &str, mode: Option<&str>, no_child: bool) -> Result<(
         .map_err(|e| format!("install_endpoint 失败：{e}（可用 vxapo-cli snapshot diff -d {guid} 查看变更）", guid = dev.guid))?;
     println!("✓ 已安装 {}（模式 {:?}，子 APO 保留={}）", dev.guid, config.install_mode, !no_child);
 
-    // 重启音频服务使新槽位拓扑生效（audiodg 锁定旧拓扑）。
-    restart_audio_service()?;
-
     // per-device config.txt 检查（方案 A）：缺失时**自动从 exe 同级 .\config.txt 导入**，
     // 避免「装完发现没配置」。约定：把 config.txt 放在 vxapo-cli.exe 同目录即可，
     // 安装自动复制到 C:\ProgramData\VxAPO\{guid}\config.txt 供 APO 解析（audiodg-SYSTEM 可读）。
@@ -365,6 +362,10 @@ pub fn install(device_ref: &str, mode: Option<&str>, no_child: bool) -> Result<(
             }
         }
     }
+
+    // 最后重启音频服务使新槽位拓扑 + config 生效（audiodg 锁定旧拓扑；
+    // 重启时 watcher 启动会解析已导入的 config）。
+    restart_audio_service()?;
     Ok(())
 }
 
