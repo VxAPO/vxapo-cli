@@ -49,23 +49,27 @@ pub fn resolve_device(device_ref: &str) -> Result<DeviceRef, String> {
 }
 
 /// 管理员检查（install/uninstall 需 HKLM 写权限）。
+///
+/// 真实写验证：create 探测键后**写入一个值**再删除——仅 create/open 成功不够
+/// （键已存在时无写权限的用户也可能打开成功，导致 install 阶段才报 0x80070005）。
 pub fn require_admin() -> Result<(), String> {
-    // 以写注册表能力探测管理员权限（HKLM 写测试不需额外依赖）。
-    // 经 driver RegKey::create 写探测键（幂等：无权限会 Err）。
     let probe_key = r"SOFTWARE\VxAPO\CLIProbe";
-    match vxapo_driver::sys::registry::RegKey::create(
-        windows::Win32::System::Registry::HKEY_LOCAL_MACHINE,
-        probe_key,
-    ) {
-        Ok(_) => {
-            let _ = vxapo_driver::sys::registry::RegKey::open(
-                windows::Win32::System::Registry::HKEY_LOCAL_MACHINE,
-                probe_key,
-            )
-            .and_then(|k| k.delete_sub_key(probe_key));
-            Ok(())
+    let root = windows::Win32::System::Registry::HKEY_LOCAL_MACHINE;
+    match vxapo_driver::sys::registry::RegKey::create(root, probe_key) {
+        Ok(key) => {
+            // 写入探测值：有 HKLM 写权限才成功。
+            let probe_ok = key.write_sz("CLIProbe", "1").is_ok();
+            let _ = key.delete_value("CLIProbe");
+            drop(key);
+            let _ = vxapo_driver::sys::registry::RegKey::open(root, probe_key)
+                .and_then(|k| k.delete_sub_key(probe_key));
+            if probe_ok {
+                Ok(())
+            } else {
+                Err("需要管理员权限（写入 HKLM）。请以管理员身份运行 CLI（右键→以管理员身份运行）。".to_string())
+            }
         }
-        Err(_) => Err("需要管理员权限（写入 HKLM）。请以管理员运行 CLI。".to_string()),
+        Err(_) => Err("需要管理员权限（写入 HKLM）。请以管理员身份运行 CLI（右键→以管理员身份运行）。".to_string()),
     }
 }
 
