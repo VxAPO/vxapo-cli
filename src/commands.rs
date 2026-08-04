@@ -97,6 +97,10 @@ pub fn list_devices() -> Result<(), String> {
             let sname = slot_names[s];
             println!("     {}[{}]: {label}", sname, s);
         }
+        // EAPO 安装行为（用户要求：除 VxAPO CLSID 外还要能确定 EAPO 安装状态给 CLI 看）
+        if let Some(eapo) = detect_eapo_status(&d.slots) {
+            println!("     ▶ {eapo}");
+        }
         // 槽位失守检测（v8.5 判定语义：**只有 childapo 键存在（非全量=已安装过）才验证**；
         // 初次安装/完全卸载后（键不存在=全量路径）不走失守逻辑）
         if !guid.is_empty() && child_apo_key_exists(&guid) {
@@ -124,11 +128,54 @@ fn detect_lost_slot(
     }
 }
 
+/// 检测设备上 EAPO 安装状态（哪些槽位被 EAPO PreMix/PostMix 占用）。
+///
+/// EAPO 的 CLSID 实证：PreMix={EACD2258-...}、PostMix={EC1CC9CE-...}
+/// （与 knowledge::KNOWN_APO_CLSIDS 一致）。返回 None = 无 EAPO。
+fn detect_eapo_status(
+    slots: &[vxapo_driver::install::device::slots::SlotValue; 5],
+) -> Option<String> {
+    const EAPO_PRE: &str = "eacd2258-fcac-4ff4-b36d-419e924a6d79";
+    const EAPO_POST: &str = "ec1cc9ce-faed-4822-828a-82a81a6f018f";
+    const SLOT_NAMES: [&str; 5] = ["LFX", "GFX", "SFX", "MFX", "EFX"];
+
+    let mut pre_slot: Option<&str> = None;
+    let mut post_slot: Option<&str> = None;
+    for (s, val) in slots.iter().enumerate() {
+        let normalized = match val {
+            vxapo_driver::install::device::slots::SlotValue::Guid(g) => {
+                format!("{g:?}").to_lowercase().replace(['{', '}'], "")
+            }
+            _ => continue,
+        };
+        if normalized == EAPO_PRE {
+            pre_slot = Some(SLOT_NAMES[s]);
+        }
+        if normalized == EAPO_POST {
+            post_slot = Some(SLOT_NAMES[s]);
+        }
+    }
+    match (pre_slot, post_slot) {
+        (Some(p), Some(q)) => Some(format!("EAPO 已安装：PreMix=({p}) + PostMix=({q})")),
+        (Some(p), None) => Some(format!("EAPO 部分安装：仅 PreMix=({p})")),
+        (None, Some(q)) => Some(format!("EAPO 部分安装：仅 PostMix=({q})")),
+        (None, None) => None,
+    }
+}
+
 /// 槽位 GUID → 友好名（4.5：EAPO/VxAPO CLSID 映射）。
+///
+/// 输入来自 `format!("{g:?}")`（windows-rs GUID Debug，大小写/花括号不确定），
+/// 与 KNOWN_APO_CLSIDS key（`{eacd2258-...}` 小写带花括号）做**规范化匹配**：
+/// 去花括号 + 转小写比较，兼容两种字形。
 fn slot_friendly(clsid: &str) -> Option<String> {
-    let lower = clsid.to_lowercase();
-    let value = KNOWN_APO_CLSIDS.get(lower.as_str())?;
-    Some((*value).to_string())
+    let normalized = clsid.to_lowercase().replace(['{', '}'], "");
+    for (k, v) in KNOWN_APO_CLSIDS.iter() {
+        if k.to_lowercase().replace(['{', '}'], "") == normalized {
+            return Some((*v).to_string());
+        }
+    }
+    None
 }
 
 /// install 命令（CLI 引用规范 5.1）。
