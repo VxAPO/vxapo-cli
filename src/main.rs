@@ -133,10 +133,10 @@ fn viewer_mode() {
         } else {
             display::print_endpoints(&app.endpoints);
         }
-        println!("  [序号] 查看详情  [r] 刷新  [exit] 回模式选择");
+        println!("  [序号] 查看详情  [r] 刷新  [q] 回模式选择");
         print!("> ");
         match read_line().as_str() {
-            "exit" | "quit" => break,
+            "q" | "quit" | "exit" => break,
             "r" | "refresh" => continue,
             input => {
                 if let Ok(idx) = input.parse::<usize>() {
@@ -156,16 +156,16 @@ fn viewer_mode() {
 /// 设备详情页（查看模式）：槽位/格式/增强等全量诊断。返回 true=回模式选择。
 fn viewer_detail(ep: &endpoint::Endpoint) -> bool {
     display::print_detail_header(ep);
-    println!("  [b] 返回列表  [exit] 回模式选择");
+    println!("  [b] 返回列表  [q] 回模式选择");
     print!("> ");
     match read_line().as_str() {
-        "exit" | "quit" => true,
+        "q" | "quit" | "exit" => true,
         _ => false,
     }
 }
 
 /// Driver 模式：install 层设备列表（版本/模式/5 槽位/失守）+ 设备操作菜单。
-/// `exit` 返回模式选择。
+/// `q` 返回模式选择。
 fn driver_mode() {
     loop {
         match commands::list_devices() {
@@ -174,13 +174,16 @@ fn driver_mode() {
         }
         println!("\n--- Driver 模式 ---");
         println!("  [序号] 选择设备（install/uninstall/config/snapshot/转储）");
-        println!("  [exit] 回模式选择");
+        println!("  [q] 回模式选择");
         print!("> ");
         match read_line().as_str() {
-            "exit" | "quit" => break,
+            "q" | "quit" | "exit" => break,
             input => {
                 if let Ok(idx) = input.parse::<usize>() {
-                    driver_device_menu(&idx);
+                    // 返回 true=设备子菜单里 q 了 → 退出 Driver 模式回模式选择。
+                    if driver_device_menu(&idx) {
+                        break;
+                    }
                     continue;
                 }
                 println!("未知输入：{input}");
@@ -190,30 +193,32 @@ fn driver_mode() {
 }
 
 /// 设备子菜单（Driver 模式）：install/uninstall/config/snapshot/转储。
-/// `b` 返回设备列表；`exit` 回模式选择。
-fn driver_device_menu(dev_idx: &usize) {
+///
+/// 返回：`true` = 用户按 `q` 回模式选择；`false` = 返回设备列表（b）。
+/// `b` 返回设备列表；`q` 回模式选择；`h` 呼出帮助。
+fn driver_device_menu(dev_idx: &usize) -> bool {
     let dev = match resolve_device_ref(*dev_idx) {
         Ok(d) => d,
         Err(e) => {
             println!("✗ {e}");
-            return;
+            return false;
         }
     };
     // 每次进入重新枚举 probe，供注册表转储按 GUID 匹配端点（driver 序号 ≠ probe 序号）。
     let mut app = App::new();
     app.refresh();
-    let mut exit_to_mode = false;
     loop {
         println!("\n--- 设备 {dev_idx}：{} ---", dev.name);
-        println!("  [i] 安装       [u] 卸载        [c] 配置管理");
+        println!("  [i] 安装       [u] 卸载        [c] 配置管理     [h] 帮助");
         println!("  [p] 快照 diff  [r] 快照恢复    [x] 转储注册表");
-        println!("  [s] 状态详情   [b] 返回列表    [exit] 回模式选择");
+        println!("  [s] 状态详情   [b] 返回列表    [q] 回模式选择");
         print!("> ");
         match read_line().as_str() {
-            "b" | "" => break,
-            "exit" | "quit" => {
-                exit_to_mode = true;
-                break;
+            "b" | "" => return false,
+            "q" | "quit" | "exit" => return true,
+            "h" | "help" | "--help" => {
+                print_help();
+                println!();
             }
             "i" => install_and_guide(&dev, *dev_idx),
             "u" => {
@@ -265,7 +270,7 @@ fn driver_device_menu(dev_idx: &usize) {
                     .map(|s| s.to_string())
                     .collect();
                 if args.is_empty() {
-                    println!("未知输入（i/u/c/p/r/x/s/b/exit，或直接打子命令如 install -d {dev_idx}）");
+                    println!("未知输入（i/u/c/p/r/x/s/b/q/h，或直接打子命令如 install -d {dev_idx}）");
                 } else {
                     let known = matches!(
                         args[0].as_str(),
@@ -277,14 +282,11 @@ fn driver_device_menu(dev_idx: &usize) {
                             println!("  子命令执行失败（退出码 {code}）。可用 help 查看用法。");
                         }
                     } else {
-                        println!("未知输入：{input}（支持 i/u/c/p/r/x/s/b/exit，或直接打子命令如 install -d {dev_idx}）");
+                        println!("未知输入：{input}（支持 i/u/c/p/r/x/s/b/q/h，或直接打子命令如 install -d {dev_idx}）");
                     }
                 }
             }
         }
-    }
-    if exit_to_mode {
-        println!("（返回模式选择）");
     }
 }
 
@@ -318,8 +320,8 @@ fn install_and_guide(dev: &commands::DeviceRef, dev_idx: usize) {
     match commands::install(&dev.guid, None, no_child) {
         Ok(()) => {
             println!("✓ 安装完成（模式 SfxEfx，子 APO 保留={keep_child}）。");
-            println!("  调音：导入 config.txt（在本菜单直接输入下列命令即可）：");
-            println!("    config set -d {dev_idx} -f <你的config.txt路径>");
+            println!("  调音：导入 config.txt（默认读 exe 同级 .\\config.txt，可用 config set 指定别的路径）：");
+            println!("    config set -d {dev_idx} -f .\\config.txt");
             println!("  查看是否已配置：config show -d {dev_idx}");
         }
         Err(e) => {
