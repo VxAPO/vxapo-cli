@@ -36,6 +36,16 @@ pub static KNOWN_PROPERTIES: LazyLock<HashMap<&'static str, PropertyMeta>> = Laz
     m
 });
 
+/// APO CLSID → 友好名映射（CLI 引用规范 4.5：EAPO/VxAPO pre/postmix 实读源码确认）。
+pub static KNOWN_APO_CLSIDS: LazyLock<HashMap<&'static str, &'static str>> = LazyLock::new(|| {
+    let mut m = HashMap::new();
+    m.insert("{eacd2258-fcac-4ff4-b36d-419e924a6d79}", "Equalizer APO PreMix");
+    m.insert("{ec1cc9ce-faed-4822-828a-82a81a6f018f}", "Equalizer APO PostMix");
+    m.insert("{41c34613-d391-459d-a039-72b2b15a1a1d}", "VxAPO PreMix");
+    m.insert("{b4a97313-abc0-45ed-9c33-428b20d39428}", "VxAPO PostMix");
+    m
+});
+
 pub const SYSTEM_APO_CLSIDS: &[&str] = &[
     "{da2c9ece-7418-4906-b4fa-0a00b3eb88aa}",
     "{c9453e73-8c5c-4463-9984-af8bab2f5447}",

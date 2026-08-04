@@ -5,3 +5,5 @@ edition = "2021"
 
 [dependencies]
 winreg = "0.52"
+vxapo-driver = { path = "../vxapo-driver" }
+windows = { version = "0.62.2", features = ["Win32_System_Registry", "Win32_Foundation"] }
