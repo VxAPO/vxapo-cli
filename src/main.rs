@@ -44,11 +44,27 @@ fn run_subcommand(args: &[String]) -> i32 {
             }
         }
         "uninstall" => {
-            let dev = args.get(1).map(|s| s.as_str()).unwrap_or("");
-            if dev.is_empty() || args.len() < 3 || args[1] == "-d" {
+            // 兼容 `-d <device>` 与裸 `<device>`（install 同样支持 -d）。
+            let mut dev = String::new();
+            let rest = &args[1..];
+            let mut i = 0;
+            while i < rest.len() {
+                match rest[i].as_str() {
+                    "-d" | "--device" => {
+                        i += 1;
+                        if let Some(d) = rest.get(i) {
+                            dev = d.clone();
+                        }
+                    }
+                    other if dev.is_empty() && !other.starts_with('-') => dev = other.to_string(),
+                    _ => {}
+                }
+                i += 1;
+            }
+            if dev.is_empty() {
                 Err("uninstall 用法：vxapo-cli uninstall -d <device>".to_string())
             } else {
-                commands::uninstall(dev)
+                commands::uninstall(&dev)
             }
         }
         "config" => {
@@ -382,9 +398,18 @@ fn run_config(args: &[String]) -> Result<(), String> {
 }
 
 /// snapshot 子命令：`snapshot diff -d <device>` / `snapshot restore -d <device>`。
+///
+/// `<device>` 支持 `{GUID}` 或枚举序号（与 install/uninstall 一致——序号先
+/// resolve_device 转 GUID；`{GUID}` 原样传给底层）。
 fn run_snapshot(args: &[String]) -> Result<(), String> {
     let sub = args.first().map(|s| s.as_str()).unwrap_or("");
-    let (guid, _) = parse_device_file(&args[1..]);
+    let (dev_ref, _) = parse_device_file(&args[1..]);
+    if dev_ref.is_empty() {
+        return Err("snapshot 需要 -d <device>（{GUID} 或 list 序号）".to_string());
+    }
+    // 序号 → GUID（install/uninstall 同款 resolve；{GUID} 直接通过）。
+    let dev = commands::resolve_device(&dev_ref)?;
+    let guid = dev.guid;
     match sub {
         "diff" | "changes" => {
             let diff = commands::snapshot_diff(&guid)?;

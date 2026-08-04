@@ -1,0 +1,1 @@
+✗ install_endpoint 失败：内部错误: 安装自检失败：CoCreateInstance(CLSID) err=尚未调用 CoInitialize。 (0x800401F0)（可用 vxapo-cli snapshot diff -d {3b1c3cb8-af9e-47b9-b776-3dac8c7ca333} 查看变更）
