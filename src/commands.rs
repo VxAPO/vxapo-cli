@@ -21,6 +21,32 @@ pub struct DeviceRef {
     pub connection: String,
 }
 
+/// 安装前预览：设备 + 5 槽位占用摘要（交互菜单安装前展示）。
+///
+/// 展示当前谁占着 PreMix/PostMix 槽位（EAPO 等用友好名），
+/// 供用户决定是否保留为子 APO。
+pub fn preview_install(device_ref: &str) -> Result<String, String> {
+    let dev = resolve_device(device_ref)?;
+    let devices = enumerate_devices().map_err(|e| format!("枚举设备失败：{e}"))?;
+    let d = devices
+        .iter()
+        .find(|d| d.endpoint.as_ref().map(|e| e.endpoint_guid.eq_ignore_ascii_case(&dev.guid)).unwrap_or(false))
+        .ok_or_else(|| "设备不在枚举列表".to_string())?;
+    let slot_names = ["LFX", "GFX", "SFX", "MFX", "EFX"];
+    let mut lines = vec![format!("  设备：{}", dev.name)];
+    for (i, val) in d.slots.iter().enumerate() {
+        let label = match val {
+            vxapo_driver::install::device::slots::SlotValue::Guid(g) => {
+                let gs = format!("{g:?}");
+                slot_friendly(&gs).unwrap_or_else(|| gs.clone())
+            }
+            _ => "-".to_string(),
+        };
+        lines.push(format!("  {}[{}]: {label}", slot_names[i], i));
+    }
+    Ok(lines.join("\n"))
+}
+
 /// 解析 `<device>`：GUID（规范形式）或枚举序号 → (guid, name, connection)。
 pub fn resolve_device(device_ref: &str) -> Result<DeviceRef, String> {
     let devices = enumerate_devices().map_err(|e| format!("枚举设备失败：{e}"))?;

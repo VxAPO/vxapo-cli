@@ -284,13 +284,36 @@ fn driver_device_menu(dev_idx: &usize) {
     }
 }
 
-/// 安装并引导（交互模式）：按 i 直接执行默认安装（SfxEfx + 保留子 APO），
-/// 完成后提示菜单内如何导入 config.txt 调音配置（config set 可在本菜单直接输入）。
+/// 安装并引导（交互模式）：先展示槽位占用预览，询问是否保留现有 APO 为子 APO，
+/// 再确认执行安装。完成后提示导入 config.txt 调音配置。
 fn install_and_guide(dev: &commands::DeviceRef, dev_idx: usize) {
-    println!("  正在安装到 [{dev_idx}] {}…", dev.name);
-    match commands::install(&dev.guid, None, false) {
+    println!("  正在准备安装到 [{dev_idx}] {}…", dev.name);
+
+    // 槽位占用预览（当前谁占着 PreMix/PostMix）。
+    match commands::preview_install(&dev_idx.to_string()) {
+        Ok(preview) => println!("{preview}"),
+        Err(e) => println!("⚠ 预览失败（继续安装）：{e}"),
+    }
+    println!("  安装将把 VxAPO 写入 PreMix+PostMix 槽位（默认 SfxEfx 模式）。");
+
+    // 询问是否保留现有 APO 为子 APO（默认保留，回车进入确认）。
+    print!("  保留现有 APO 为子 APO？（y=保留 / n=不保留 / 回车=保留）> ");
+    std::io::stdout().flush().unwrap();
+    let keep = read_line();
+    let keep_child = keep.trim().to_ascii_lowercase() != "n";
+
+    print!("  开始安装（模式 SfxEfx）？按回车确认 / q 取消 > ");
+    std::io::stdout().flush().unwrap();
+    let confirm = read_line();
+    if confirm.trim().to_ascii_lowercase() == "q" {
+        println!("已取消。");
+        return;
+    }
+
+    let no_child = !keep_child;
+    match commands::install(&dev.guid, None, no_child) {
         Ok(()) => {
-            println!("✓ 安装完成（模式 SfxEfx）。");
+            println!("✓ 安装完成（模式 SfxEfx，子 APO 保留={keep_child}）。");
             println!("  调音：导入 config.txt（在本菜单直接输入下列命令即可）：");
             println!("    config set -d {dev_idx} -f <你的config.txt路径>");
             println!("  查看是否已配置：config show -d {dev_idx}");
