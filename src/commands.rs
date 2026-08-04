@@ -203,6 +203,17 @@ pub fn install(device_ref: &str, mode: Option<&str>, no_child: bool) -> Result<(
     install_endpoint(&dev.guid, &dev.name, &dev.connection, &config, true)
         .map_err(|e| format!("install_endpoint 失败：{e}（可用 vxapo-cli snapshot diff -d {guid} 查看变更）", guid = dev.guid))?;
     println!("✓ 已安装 {}（模式 {:?}，子 APO 保留={}）", dev.guid, config.install_mode, !no_child);
+
+    // per-device config.txt 检查（P0-3 配置入口）：缺失时明确提示用户补写 DSP 配置，
+    // 避免「装完发现没配置」——config 写归 CLI（config set），不阻塞安装（默认无配置可运行）。
+    match config_show(&dev.guid) {
+        Ok(()) => {}
+        Err(_) => {
+            let path = config_path(&dev.guid).unwrap_or_default();
+            println!("⚠ 未检测到 config.txt（{path}），APO 将按无配置运行。");
+            println!("   请用 config set 写入：vxapo-cli config set -d <device> -f <你的配置文件>");
+        }
+    }
     Ok(())
 }
 
