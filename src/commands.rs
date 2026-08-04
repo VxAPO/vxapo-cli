@@ -10,7 +10,6 @@ use vxapo_driver::install::device::info::enumerate_devices;
 use vxapo_driver::install::device::slots::{ChildApoKind, child_apo_key_exists, read_child_apo_guid};
 use vxapo_driver::install::selector::operation::{InstallConfig, install_endpoint, uninstall_endpoint};
 use vxapo_driver::object::vx_reg_props::{CLSID_VXAPO_POST_MIX, CLSID_VXAPO_PRE_MIX};
-use vxapo_driver::sys::known_folder::documents_folder;
 
 use crate::knowledge::KNOWN_APO_CLSIDS;
 
@@ -293,9 +292,10 @@ pub fn install(device_ref: &str, mode: Option<&str>, no_child: bool) -> Result<(
         .map_err(|e| format!("install_endpoint 失败：{e}（可用 vxapo-cli snapshot diff -d {guid} 查看变更）", guid = dev.guid))?;
     println!("✓ 已安装 {}（模式 {:?}，子 APO 保留={}）", dev.guid, config.install_mode, !no_child);
 
-    // per-device config.txt 检查（P0-3 配置入口）：缺失时**自动从 exe 同级 .\config.txt 导入**，
+    // per-device config.txt 检查（方案 A）：缺失时**自动从 exe 同级 .\config.txt 导入**，
     // 避免「装完发现没配置」。约定：把 config.txt 放在 vxapo-cli.exe 同目录即可，
-    // 安装自动复制到 Documents\VxAPO\{guid}\config.txt 供 APO 解析。config 写归 CLI（非 driver）。
+    // 安装自动复制到 C:\ProgramData\VxAPO\{guid}\config.txt 供 APO 解析（audiodg-SYSTEM 可读）。
+    // config 写归 CLI（非 driver）。
     match config_show(&dev.guid) {
         Ok(()) => {}
         Err(_) => {
@@ -379,10 +379,14 @@ pub fn config_show(device_ref: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// per-device config 路径（CLI 引用规范 4.4.1：documents_folder()\VxAPO\{GUID}\config.txt）。
+/// per-device config 路径（方案 A，2026-08-04：C:\ProgramData\VxAPO\{GUID}\config.txt）。
+///
+/// **为什么不用 Documents**：APO 真实运行在 audiodg（SYSTEM 服务），调 `documents_folder()`
+/// 拿到 SYSTEM 的 Documents，读不到 CLI（用户进程）写进用户 Documents 的文件——
+/// 导致「改 Documents 的 config 没效果」。ProgramData 全用户共享，SYSTEM + 用户都可读写。
+/// 与 driver `resolve_config_path`（scheme A）保持一致。
 fn config_path(guid: &str) -> Result<String, String> {
-    let docs = documents_folder().map_err(|e| format!("Documents 解析失败：{e}"))?;
-    Ok(format!("{}\\VxAPO\\{guid}\\config.txt", docs.trim_end_matches('\\')))
+    Ok(format!(r"C:\ProgramData\VxAPO\{guid}\config.txt"))
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
