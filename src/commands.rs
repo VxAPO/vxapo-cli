@@ -20,6 +20,39 @@ pub struct DeviceRef {
     pub connection: String,
 }
 
+/// 重启 Windows 音频服务（audiosrv → audiodg）。
+///
+/// audiodg 持有点端时会锁 MMDevices 槽位值——卸载前必须停服务（否则槽位删不掉），
+/// 安装/卸载后必须重启使新槽位拓扑生效（2026-08-04 实测）。
+/// 需要管理员（require_admin 已保证）。
+fn restart_audio_service() -> Result<(), String> {
+    println!("  ♻ 重启音频服务（audiosrv）…");
+    let stop = std::process::Command::new("net")
+        .args(["stop", "audiosrv"])
+        .output()
+        .map_err(|e| format!("net stop audiosrv 执行失败：{e}"))?;
+    if !stop.status.success() {
+        // 服务本就没在运行也视为成功（错误码可能在 stderr）。
+        // audiodg 不存在时 net stop 报错，但音频相关进程可能已被停。
+        println!("  （net stop 返回非零：{}，继续）", String::from_utf8_lossy(&stop.stderr).trim());
+    }
+    // 短暂等待服务停止。
+    std::thread::sleep(std::time::Duration::from_millis(1500));
+    let start = std::process::Command::new("net")
+        .args(["start", "audiosrv"])
+        .output()
+        .map_err(|e| format!("net start audiosrv 执行失败：{e}"))?;
+    if !start.status.success() {
+        let msg = String::from_utf8_lossy(&start.stderr).trim().to_string();
+        // 已启动（"already running"）不算错误；其他失败才报。
+        if !msg.to_lowercase().contains("already") {
+            return Err(format!("net start audiosrv 失败：{msg}"));
+        }
+    }
+    println!("  ♻ 音频服务已重启");
+    Ok(())
+}
+
 /// 安装前预览：设备 + 5 槽位占用摘要（交互菜单安装前展示）。
 ///
 /// 展示当前谁占着 PreMix/PostMix 槽位（EAPO 等用友好名），
@@ -292,6 +325,9 @@ pub fn install(device_ref: &str, mode: Option<&str>, no_child: bool) -> Result<(
         .map_err(|e| format!("install_endpoint 失败：{e}（可用 vxapo-cli snapshot diff -d {guid} 查看变更）", guid = dev.guid))?;
     println!("✓ 已安装 {}（模式 {:?}，子 APO 保留={}）", dev.guid, config.install_mode, !no_child);
 
+    // 重启音频服务使新槽位拓扑生效（audiodg 锁定旧拓扑）。
+    restart_audio_service()?;
+
     // per-device config.txt 检查（方案 A）：缺失时**自动从 exe 同级 .\config.txt 导入**，
     // 避免「装完发现没配置」。约定：把 config.txt 放在 vxapo-cli.exe 同目录即可，
     // 安装自动复制到 C:\ProgramData\VxAPO\{guid}\config.txt 供 APO 解析（audiodg-SYSTEM 可读）。
@@ -339,13 +375,32 @@ pub fn uninstall(device_ref: &str) -> Result<(), String> {
     if !snapshot_exists(&dev.guid) {
         return Err("无基线可对比——快照不存在（先 install 建立基线）".to_string());
     }
-    uninstall_endpoint(&dev.guid).map_err(|e| format!("uninstall_endpoint 失败：{e}"))?;
+    // 卸载前停音频服务：audiodg 持有点端会锁 MMDevices 槽位值，不停服务槽位删不掉。
+    println!("  ♻ 停止音频服务（卸载前置）…");
+    let stop = std::process::Command::new("net")
+        .args(["stop", "audiosrv"])
+        .output()
+        .map_err(|e| format!("net stop audiosrv 执行失败：{e}"))?;
+    if !stop.status.success() {
+        println!("  （net stop 返回非零：{}，继续）", String::from_utf8_lossy(&stop.stderr).trim());
+    }
+    std::thread::sleep(std::time::Duration::from_millis(1500));
+
+    // 卸载（服务已停 → 槽位值删除不被锁）。
+    if let Err(e) = uninstall_endpoint(&dev.guid) {
+        // 卸载失败也要尝试恢复音频服务。
+        let _ = std::process::Command::new("net").args(["start", "audiosrv"]).output();
+        return Err(format!("uninstall_endpoint 失败：{e}"));
+    }
     print!("✓ 已卸载 {}。", dev.guid);
     if let Ok(diff) = snapshot_diff(&dev.guid) {
         println!(" 变更统计：{diff}");
     } else {
         println!();
     }
+
+    // 重启音频服务恢复声音输出。
+    restart_audio_service()?;
     Ok(())
 }
 
