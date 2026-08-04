@@ -263,13 +263,22 @@ pub fn install(device_ref: &str, mode: Option<&str>, no_child: bool) -> Result<(
     require_admin()?;
     let dev = resolve_device(device_ref)?;
     let mut config = InstallConfig::default_config();
-    if let Some(m) = mode {
-        config.install_mode = match m.to_lowercase().as_str() {
-            "lfxgfx" => vxapo_driver::install::device::slots::InstallMode::LfxGfx,
-            "sfxmfx" => vxapo_driver::install::device::slots::InstallMode::SfxMfx,
-            "sfxefx" => vxapo_driver::install::device::slots::InstallMode::SfxEfx,
-            _ => return Err(format!("无效模式：{m}（LfxGfx/SfxMfx/SfxEfx）")),
-        };
+    match mode {
+        // 显式 --mode：用户覆盖，不探测。
+        Some(m) => {
+            config.install_mode = match m.to_lowercase().as_str() {
+                "lfxgfx" => vxapo_driver::install::device::slots::InstallMode::LfxGfx,
+                "sfxmfx" => vxapo_driver::install::device::slots::InstallMode::SfxMfx,
+                "sfxefx" => vxapo_driver::install::device::slots::InstallMode::SfxEfx,
+                _ => return Err(format!("无效模式：{m}（LfxGfx/SfxMfx/SfxEfx）")),
+            };
+        }
+        // 缺省：自动探测（EAPO 三档，driver detect_mode_for_guid）。
+        None => {
+            config.install_mode =
+                vxapo_driver::install::device::info::detect_mode_for_guid(&dev.guid);
+            println!("▶ 自动探测安装模式：{:?}", config.install_mode);
+        }
     }
     config.use_original_apo_premix = !no_child;
     config.use_original_apo_postmix = !no_child;
