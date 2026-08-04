@@ -4,3 +4,7 @@
 
 # 调试临时输出
 *_out.txt
+
+# 调试临时文件
+audiodg_mods.txt
+verify_install.txt
