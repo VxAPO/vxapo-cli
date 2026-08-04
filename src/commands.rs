@@ -9,9 +9,61 @@ use vxapo_driver::install::audiodg::ensure_can_load;
 use vxapo_driver::install::device::info::enumerate_devices;
 use vxapo_driver::install::device::slots::{ChildApoKind, child_apo_key_exists, read_child_apo_guid};
 use vxapo_driver::install::selector::operation::{InstallConfig, install_endpoint, uninstall_endpoint};
+use vxapo_driver::object::dll_exports::register_apo_with_path;
+use vxapo_driver::sys::com::prelude::guid_to_string;
 use vxapo_driver::object::vx_reg_props::{CLSID_VXAPO_POST_MIX, CLSID_VXAPO_PRE_MIX};
 
 use crate::knowledge::KNOWN_APO_CLSIDS;
+
+/// 定位 exe 同级 vxapo_driver.dll 并自动注册 COM 类（新机器无绑定）。
+///
+/// 新开发者拿到 CLI + driver 二进制直接 `install` 时，注册表里没有 CLSID 绑定
+/// （未跑过 regsvr32）→ verify(CoCreateInstance) 会 0x80040154。CLI 安装前
+/// 自动从 exe 同级找 vxapo_driver.dll 并调 driver 的 `register_apo_with_path`，
+/// 使 CLSID → DLL 路径绑定就绪。
+///
+/// 找不到 DLL 不阻塞（可能已由安装器/regsvr32 预注册，verify 通过即可）。
+fn auto_register_driver() -> Result<(), String> {
+    let exe_dir = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|p| p.to_path_buf()))
+        .unwrap_or_default();
+    let dll = exe_dir.join("vxapo_driver.dll");
+    if !dll.exists() {
+        println!("  ⚠ 未找到 {}（跳过自动注册——已由安装器/regsvr32 注册则无碍）", dll.display());
+        return Ok(());
+    }
+    let hr = register_apo_with_path(&dll.display().to_string());
+    if hr.0 == 0 {
+        println!("  ✓ 已注册全局 APO 类：{}", dll.display());
+    } else {
+        return Err(format!("driver 自动注册失败：{hr:?}"));
+    }
+    // 回读验证 CLSID 绑定（PreMix 即可，两者同路径）。
+    let clsid_str = guid_to_string(&CLSID_VXAPO_PRE_MIX);
+    let check = vxapo_driver::sys::registry::RegKey::open(
+        windows::Win32::System::Registry::HKEY_CLASSES_ROOT,
+        &format!(r"CLSID\{}\InprocServer32", clsid_str),
+    );
+    match check {
+        Ok(k) => match k.read_sz_value("") {
+            Ok(p) => println!("  ✓ CLSID→DLL 绑定确认：{p}"),
+            Err(e) => return Err(format!("CLSID 绑定回读失败：{e}")),
+        },
+        Err(e) => return Err(format!("CLSID 绑定验证失败：{e}")),
+    }
+    Ok(())
+}
+
+/// 校验 CLSID→DLL 绑定是否已存在（避免每次 install 重复注册）。
+fn driver_binding_exists() -> bool {
+    let clsid_str = guid_to_string(&CLSID_VXAPO_PRE_MIX);
+    vxapo_driver::sys::registry::RegKey::open(
+        windows::Win32::System::Registry::HKEY_CLASSES_ROOT,
+        &format!(r"CLSID\{}\InprocServer32", clsid_str),
+    )
+    .is_ok()
+}
 
 /// 设备三元组（resolve_device 产物，CLI 引用规范 4.4.1）。
 pub struct DeviceRef {
@@ -318,6 +370,11 @@ pub fn install(device_ref: &str, mode: Option<&str>, no_child: bool) -> Result<(
     // 快照基线（安装前建立/替换，Phase C——只注册表，config 不属 CLI 快照）。
     if let Err(e) = snapshot_device(&dev.guid, true) {
         println!("⚠ 快照建立失败（继续安装）：{e}");
+    }
+
+    // 自动注册 CLSID→DLL 绑定（新机器无绑定；已存在则跳过）。
+    if !driver_binding_exists() {
+        auto_register_driver()?;
     }
 
     ensure_can_load().map_err(|e| format!("audiodg 检查失败：{e}"))?;
