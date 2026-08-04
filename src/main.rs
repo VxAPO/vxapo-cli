@@ -199,7 +199,7 @@ fn driver_device_menu(dev_idx: &usize) {
                 exit_to_mode = true;
                 break;
             }
-            "i" => install_wizard(&dev),
+            "i" => install_guide(&dev, *dev_idx),
             "u" => {
                 match commands::uninstall(&dev.guid) {
                     Ok(()) => println!("✓ 卸载完成"),
@@ -240,67 +240,32 @@ fn driver_device_menu(dev_idx: &usize) {
     }
 }
 
-/// 安装向导（交互模式）：按 i 后引导用户选择安装模式/子 APO 保留/确认，再执行。
+/// 安装指引（交互模式）：按 i 后给出该设备的子命令用法 + config.txt 导入提示。
 ///
-/// 满足「子命令与交互功能结合」：交互菜单不只是按键即执行，而是按 i 后
-/// 展示将执行的操作 + 逐项选择 + 确认，每步给出对应的子命令形式。
-fn install_wizard(dev: &commands::DeviceRef) {
-    println!("\n--- 安装向导：{dev_name} ---", dev_name = dev.name);
-    println!("  目标设备 GUID：{}", dev.guid);
-    println!("  默认安装：模式 SfxEfx（PreMix=SFX + PostMix=EFX），保留现有 APO 为子 APO");
+/// 枚举层已把序号与 GUID 对应（list 每设备行 [index] + GUID），这里指引用户
+/// 用**序号**直接打子命令——「子命令与交互功能结合」：交互用来查列表/确认对应关系，
+/// 安装本身永远是子命令行为，不做误导性的「确认安装」交互。
+fn install_guide(dev: &commands::DeviceRef, dev_idx: usize) {
+    println!("\n--- 安装指引：{dev_name} ---", dev_name = dev.name);
+    println!("  本设备序号：[{dev_idx}]     GUID：{guid}", guid = dev.guid);
+    println!("  安装到本设备，直接执行子命令：【用序号即可，无需复制 GUID】");
     println!();
-
-    // 1) 安装模式
-    println!("  安装模式（回车=SfxEfx）：[1] SfxEfx  [2] LfxGfx  [3] SfxMfx");
-    print!("> ");
-    let mode = match read_line().as_str() {
-        "2" => Some("LfxGfx"),
-        "3" => Some("SfxMfx"),
-        _ => {
-            println!("  ↳ 使用默认模式 SfxEfx");
-            None
-        }
-    };
-    let mode_str = mode.unwrap_or("SfxEfx");
-
-    // 2) 子 APO 保留
-    println!("  保留现有 Pre/PostMix APO 作为子 APO？（回车=是）[y/n]");
-    print!("> ");
-    let no_child = match read_line().as_str() {
-        "n" | "N" | "no" => {
-            println!("  ↳ 不保留（覆盖现有 APO）");
-            true
-        }
-        _ => {
-            println!("  ↳ 保留为子 APO");
-            false
-        }
-    };
-
-    // 3) 确认
-    println!("\n  将执行：vxapo-cli install -d {guid}{mode}{child}",
-        guid = dev.guid,
-        mode = mode.map(|m| format!(" --mode {m}")).unwrap_or_default(),
-        child = if no_child { " --no-child" } else { "" },
-    );
-    println!("  确认安装？（回车=确认，n=取消）");
-    print!("> ");
-    if matches!(read_line().as_str(), "n" | "N" | "no") {
-        println!("已取消安装。");
-        return;
-    }
-
-    match commands::install(&dev.guid, mode, no_child) {
-        Ok(()) => println!("✓ 安装完成（模式 {mode_str}）"),
-        Err(e) => {
-            println!("✗ {e}");
-            println!("   子命令对照：vxapo-cli install -d {}{}{}",
-                dev.guid,
-                mode.map(|m| format!(" --mode {m}")).unwrap_or_default(),
-                if no_child { " --no-child" } else { "" },
-            );
-        }
-    }
+    println!("  vxapo-cli install -d {dev_idx}");
+    println!("  # 指定模式：");
+    println!("  vxapo-cli install -d {dev_idx} --mode LfxGfx|SfxMfx|SfxEfx");
+    println!("  # 不保留现有 APO（覆盖）：加 --no-child");
+    println!("  vxapo-cli install -d {dev_idx} --no-child");
+    println!();
+    println!("  卸载：vxapo-cli uninstall -d {dev_idx}");
+    println!();
+    // config.txt 导入提示（P0-3 per-device 配置，调音效果必需）。
+    println!("  ⚠ 调音效果需要 config.txt——安装后必须导入 DSP 配置：");
+    println!("  vxapo-cli config set -d {dev_idx} -f <你的config.txt路径>");
+    println!("  # 查看当前设备是否已配置：");
+    println!("  vxapo-cli config show -d {dev_idx}");
+    println!();
+    println!("  [b] 返回设备列表");
+    let _ = read_line();
 }
 
 /// 配置子菜单：config show / config set。
