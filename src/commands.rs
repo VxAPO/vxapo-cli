@@ -5,7 +5,6 @@
 
 use std::path::Path;
 
-use vxapo_driver::install::audiodg::ensure_can_load;
 use vxapo_driver::install::device::info::enumerate_devices;
 use vxapo_driver::install::device::slots::{ChildApoKind, child_apo_key_exists, read_child_apo_guid};
 use vxapo_driver::install::selector::operation::{InstallConfig, install_endpoint, uninstall_endpoint};
@@ -29,13 +28,31 @@ fn auto_register_driver() -> Result<(), String> {
         .and_then(|p| p.parent().map(|p| p.to_path_buf()))
         .unwrap_or_default();
     let dll = exe_dir.join("vxapo_driver.dll");
-    if !dll.exists() {
+    let dll_path = if dll.exists() {
+        dll.display().to_string()
+    } else if driver_binding_exists() {
+        // 已存在 CLSID→DLL 绑定：用注册表里的路径刷新注册。
+        // 旧版注册可能缺 AudioEngine\AudioProcessingObjects 键/字段，
+        // 只按「绑定存在」跳过会导致父槽位仍不加载。
+        let clsid_str = guid_to_string(&CLSID_VXAPO_PRE_MIX);
+        vxapo_driver::sys::registry::RegKey::open(
+            windows::Win32::System::Registry::HKEY_CLASSES_ROOT,
+            &format!(r"CLSID\{}\InprocServer32", clsid_str),
+        )
+        .ok()
+        .and_then(|k| k.read_sz_value("").ok())
+        .filter(|p| !p.is_empty())
+        .unwrap_or_default()
+    } else {
+        String::new()
+    };
+    if dll_path.is_empty() {
         println!("  ⚠ 未找到 {}（跳过自动注册——已由安装器/regsvr32 注册则无碍）", dll.display());
         return Ok(());
     }
-    let hr = register_apo_with_path(&dll.display().to_string());
+    let hr = register_apo_with_path(&dll_path);
     if hr.0 == 0 {
-        println!("  ✓ 已注册全局 APO 类：{}", dll.display());
+        println!("  ✓ 已刷新全局 APO 注册：{dll_path}");
     } else {
         return Err(format!("driver 自动注册失败：{hr:?}"));
     }
@@ -70,39 +87,6 @@ pub struct DeviceRef {
     pub guid: String,
     pub name: String,
     pub connection: String,
-}
-
-/// 重启 Windows 音频服务（audiosrv → audiodg）。
-///
-/// audiodg 持有点端时会锁 MMDevices 槽位值——卸载前必须停服务（否则槽位删不掉），
-/// 安装/卸载后必须重启使新槽位拓扑生效（2026-08-04 实测）。
-/// 需要管理员（require_admin 已保证）。
-fn restart_audio_service() -> Result<(), String> {
-    println!("  ♻ 重启音频服务（audiosrv）…");
-    let stop = std::process::Command::new("net")
-        .args(["stop", "audiosrv"])
-        .output()
-        .map_err(|e| format!("net stop audiosrv 执行失败：{e}"))?;
-    if !stop.status.success() {
-        // 服务本就没在运行也视为成功（错误码可能在 stderr）。
-        // audiodg 不存在时 net stop 报错，但音频相关进程可能已被停。
-        println!("  （net stop 返回非零：{}，继续）", String::from_utf8_lossy(&stop.stderr).trim());
-    }
-    // 短暂等待服务停止。
-    std::thread::sleep(std::time::Duration::from_millis(1500));
-    let start = std::process::Command::new("net")
-        .args(["start", "audiosrv"])
-        .output()
-        .map_err(|e| format!("net start audiosrv 执行失败：{e}"))?;
-    if !start.status.success() {
-        let msg = String::from_utf8_lossy(&start.stderr).trim().to_string();
-        // 已启动（"already running"）不算错误；其他失败才报。
-        if !msg.to_lowercase().contains("already") {
-            return Err(format!("net start audiosrv 失败：{msg}"));
-        }
-    }
-    println!("  ♻ 音频服务已重启");
-    Ok(())
 }
 
 /// 安装前预览：设备 + 5 槽位占用摘要（交互菜单安装前展示）。
@@ -372,19 +356,13 @@ pub fn install(device_ref: &str, mode: Option<&str>, no_child: bool) -> Result<(
         println!("⚠ 快照建立失败（继续安装）：{e}");
     }
 
-    // 自动注册 CLSID→DLL 绑定（新机器无绑定；已存在则跳过）。
-    if !driver_binding_exists() {
-        auto_register_driver()?;
-    }
+    // 每次安装都刷新全局 APO 注册（幂等）。
+    // 旧机器可能已有 CLSID→DLL 绑定，但 AudioEngine\AudioProcessingObjects 键
+    // 是早期缺字段/缺 MaxInstances 的旧注册——只按「绑定存在」跳过会继续拒载。
+    auto_register_driver()?;
 
-    // 写死 DisableProtectedAudioDG=1（audiodg 在创建 APO 实例前检查——LockForProcess
-    // 的 ensure_can_load 太晚，实例已被拒）。EAPO 装/卸会改此值，必须安装时强制写。
-    // 2026-08-04 实测：EAPO 存在时（写入该值）VxAPO 子 APO 能加载；EAPO 卸载后
-    // 值被恢复 → VxAPO 独立父槽位被 audiodg 拒（DLL 不加载）。
-    vxapo_driver::install::audiodg::disable()
-        .map_err(|e| format!("写入 DisableProtectedAudioDG 失败：{e}"))?;
-
-    ensure_can_load().map_err(|e| format!("audiodg 检查失败：{e}"))?;
+    // DisableProtectedAudioDG、槽位/ProcessingModes 写入和安装后重启
+    // 均由 driver install_endpoint 全流程处理（CLI 不再重复）。
     install_endpoint(&dev.guid, &dev.name, &dev.connection, &config, true)
         .map_err(|e| format!("install_endpoint 失败：{e}（可用 vxapo-cli snapshot diff -d {guid} 查看变更）", guid = dev.guid))?;
     println!("✓ 已安装 {}（模式 {:?}，子 APO 保留={}）", dev.guid, config.install_mode, !no_child);
@@ -427,9 +405,7 @@ pub fn install(device_ref: &str, mode: Option<&str>, no_child: bool) -> Result<(
         }
     }
 
-    // 最后重启音频服务使新槽位拓扑 + config 生效（audiodg 锁定旧拓扑；
-    // 重启时 watcher 启动会解析已导入的 config）。
-    restart_audio_service()?;
+    // driver install_endpoint 已重启音频服务；这里只负责 config 导入。
     Ok(())
 }
 
@@ -441,12 +417,10 @@ pub fn uninstall(device_ref: &str) -> Result<(), String> {
         return Err("无基线可对比——快照不存在（先 install 建立基线）".to_string());
     }
     // 卸载前确保 audiodg 进程退出：audiodg 持有点端会**锁 MMDevices 槽位键句柄**，
-    // 单靠 net stop 不可靠（3521=服务本就没跑但进程残留，实测第一次卸载槽位删不掉）。
-    // 强杀 audiodg 立即释放句柄，保证槽位值可删。
-    println!("  ♻ 停止音频服务 + 终止 audiodg（卸载前置）…");
-    let _ = std::process::Command::new("net")
-        .args(["stop", "audiosrv"])
-        .output();
+    // 先经 driver SCM 停服务（30s 超时，不会挂死）+ taskkill 兜底杀残留 audiodg，
+    // 保证槽位值可删（2026-08-05：改用 SCM 替代 net stop——后者在服务未跑时可能挂起）。
+    println!("  停止音频服务 + 终止 audiodg（卸载前置）…");
+    let _ = vxapo_driver::install::audiodg::stop_audio_service();
     let _ = std::process::Command::new("taskkill")
         .args(["/f", "/im", "audiodg.exe"])
         .output();
@@ -483,8 +457,6 @@ pub fn uninstall(device_ref: &str) -> Result<(), String> {
         println!();
     }
 
-    // 重启音频服务恢复声音输出。
-    restart_audio_service()?;
     Ok(())
 }
 
