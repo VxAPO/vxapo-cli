@@ -367,20 +367,20 @@ pub fn install(device_ref: &str, mode: Option<&str>, no_child: bool) -> Result<(
         .map_err(|e| format!("install_endpoint 失败：{e}（可用 vxapo-cli snapshot diff -d {guid} 查看变更）", guid = dev.guid))?;
     println!("✓ 已安装 {}（模式 {:?}，子 APO 保留={}）", dev.guid, config.install_mode, !no_child);
 
-    // per-device config.txt 检查（方案 A）：缺失时**自动从 exe 同级 .\config.txt 导入**，
+    // per-device config.toml 检查（方案 A）：缺失时**自动从 exe 同级 .\config.toml 导入**，
     // 避免「装完发现没配置」。约定：把 config.txt 放在 vxapo-cli.exe 同目录即可，
-    // 安装自动复制到 C:\ProgramData\VxAPO\{guid}\config.txt 供 APO 解析（audiodg-SYSTEM 可读）。
+    // 安装自动复制到 C:\ProgramData\VxAPO\{guid}\config.toml 供 APO 解析（audiodg-SYSTEM 可读）。
     // config 写归 CLI（非 driver）。
     match config_show(&dev.guid) {
         Ok(()) => {}
         Err(_) => {
             let path = config_path(&dev.guid).unwrap_or_default();
-            // 自动导入：exe 同级 config.txt（默认约定）。
+            // 自动导入：exe 同级 config.toml（默认约定）。
             let exe_dir = std::env::current_exe()
                 .ok()
                 .and_then(|p| p.parent().map(|p| p.to_path_buf()))
                 .unwrap_or_default();
-            let default_src = exe_dir.join("config.txt");
+            let default_src = exe_dir.join("config.toml");
             if default_src.exists() {
                 match std::fs::read_to_string(&default_src) {
                     Ok(src) => {
@@ -399,7 +399,7 @@ pub fn install(device_ref: &str, mode: Option<&str>, no_child: bool) -> Result<(
                     Err(e) => println!("⚠ 读取 {} 失败：{e}", default_src.display()),
                 }
             } else {
-                println!("⚠ 未检测到 config.txt（{path}），APO 将按无配置运行。");
+                println!("⚠ 未检测到 config.toml（{path}），APO 将按无配置运行。");
                 println!("   请用 config set 写入：vxapo-cli config set -d <device> -f <你的配置文件>");
             }
         }
@@ -460,7 +460,7 @@ pub fn uninstall(device_ref: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// config set（CLI 引用规范 5.2）：源文件内容原样写入 per-device config.txt。
+/// config set（CLI 引用规范 5.2）：源文件内容原样写入 per-device config.toml。
 pub fn config_set(device_ref: &str, file: &str) -> Result<(), String> {
     let dev = resolve_device(device_ref)?;
     let src = std::fs::read_to_string(file)
@@ -481,23 +481,221 @@ pub fn config_show(device_ref: &str) -> Result<(), String> {
     let path = config_path(&dev.guid)?;
     let content = match std::fs::read_to_string(&path) {
         Ok(c) => c,
-        Err(_) => return Err("未配置：config.txt 不存在（可用 config set -f <file> 写入）".to_string()),
+        Err(_) => return Err("未配置：config.toml 不存在（可用 config set -f <file> 写入）".to_string()),
     };
-    println!("--- config.txt ({path}) ---");
+    println!("--- config.toml ({path}) ---");
     println!("{content}");
     // 读回一致性验证（CLI 引用规范 三「config show 读回验证——文件级」，不解析 DSP 语义）。
     println!("✓ 文件可读回（{} 字节）", content.len());
     Ok(())
 }
 
-/// per-device config 路径（方案 A，2026-08-04：C:\ProgramData\VxAPO\{GUID}\config.txt）。
+/// per-device config 路径（方案 A，2026-08-04：C:\ProgramData\VxAPO\{GUID}\config.toml）。
 ///
 /// **为什么不用 Documents**：APO 真实运行在 audiodg（SYSTEM 服务），调 `documents_folder()`
 /// 拿到 SYSTEM 的 Documents，读不到 CLI（用户进程）写进用户 Documents 的文件——
 /// 导致「改 Documents 的 config 没效果」。ProgramData 全用户共享，SYSTEM + 用户都可读写。
 /// 与 driver `resolve_config_path`（scheme A）保持一致。
 fn config_path(guid: &str) -> Result<String, String> {
-    Ok(format!(r"C:\ProgramData\VxAPO\{guid}\config.txt"))
+    Ok(format!(r"C:\ProgramData\VxAPO\{guid}\config.toml"))
+}
+
+/// config convert：旧 EAPO 风格 txt → config.toml（迁移期工具，v9.11）。
+///
+/// 支持 GraphicEQ / Preamp / Wide / AuralEnhancer / Reverb / Maximizer /
+/// LoudnessCorrection；不支持的命令跳过并提示手动迁移。
+pub fn config_convert(src: &str, out: Option<&str>) -> Result<(), String> {
+    let text = std::fs::read_to_string(src).map_err(|e| format!("读取失败：{src}：{e}"))?;
+    let toml = convert_txt_to_toml(&text)?;
+    let out_path = out.map(|s| s.to_string()).unwrap_or_else(|| {
+        Path::new(src)
+            .with_extension("toml")
+            .display()
+            .to_string()
+    });
+    std::fs::write(&out_path, &toml).map_err(|e| format!("写入失败：{out_path}：{e}"))?;
+    println!("✓ 已转换 {} → {}", src, out_path);
+    println!("--- 输出预览 ---");
+    println!("{toml}");
+    Ok(())
+}
+
+fn convert_txt_to_toml(text: &str) -> Result<String, String> {
+    let mut out = String::from("version = 1\n\n");
+    for line in text.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let Some((cmd, rest)) = line.split_once(':') else {
+            println!("⚠ 跳过无法识别的行：{line}");
+            continue;
+        };
+        let cmd = cmd.trim();
+        let rest = rest.trim();
+        match cmd.to_ascii_lowercase().as_str() {
+            "graphiceq" => {
+                if rest.is_empty() {
+                    println!("⚠ GraphicEQ: 空参数跳过");
+                    continue;
+                }
+                let mut bands = Vec::new();
+                for seg in rest.split(';') {
+                    let seg = seg.trim();
+                    if seg.is_empty() {
+                        continue;
+                    }
+                    let mut it = seg.split_whitespace();
+                    let (f, g) = match (it.next(), it.next()) {
+                        (Some(f), Some(g)) => (f, g),
+                        _ => return Err(format!("GraphicEQ 段无效：'{seg}'")),
+                    };
+                    let f: f32 = f
+                        .replace(',', ".")
+                        .parse()
+                        .map_err(|_| format!("频率无效：{f}"))?;
+                    let g: f32 = g
+                        .replace(',', ".")
+                        .parse()
+                        .map_err(|_| format!("增益无效：{g}"))?;
+                    bands.push((f, g));
+                }
+                if !(6..=31).contains(&bands.len()) {
+                    return Err(format!(
+                        "GraphicEQ 转换后 {} 段，PEQ 要求 6-31 段（请手动调整曲线）",
+                        bands.len()
+                    ));
+                }
+                out.push_str("[[effects]]\ntype = \"peq\"\n");
+                for (f, g) in &bands {
+                    out.push_str(&format!(
+                        "[[effects.bands]]\nfc = {f}\ngain_db = {g}\nq = 1.0\n"
+                    ));
+                }
+                out.push('\n');
+            }
+            "preamp" => {
+                let db = rest
+                    .split_whitespace()
+                    .next()
+                    .ok_or_else(|| "Preamp 参数无效".to_string())?;
+                out.push_str(&format!("[[effects]]\ntype = \"preamp\"\ngain_db = {db}\n\n"));
+            }
+            "wide" => {
+                let kv = parse_kv(rest)?;
+                let intensity = kv
+                    .get("intensity")
+                    .or_else(|| kv.get("surround"))
+                    .ok_or_else(|| "Wide 缺少 Intensity".to_string())?;
+                out.push_str(&format!(
+                    "[[effects]]\ntype = \"wide\"\nintensity = {intensity}\n\n"
+                ));
+            }
+            "auralenhancer" => {
+                let kv = parse_kv(rest)?;
+                out.push_str("[[effects]]\ntype = \"aural\"\n");
+                write_mapped(
+                    &mut out,
+                    &kv,
+                    &[
+                        ("tunehz", "tune_hz"),
+                        ("drive", "drive"),
+                        ("odd", "odd"),
+                        ("even", "even"),
+                        ("wet", "wet"),
+                        ("dry", "dry"),
+                    ],
+                );
+                out.push('\n');
+            }
+            "reverb" => {
+                let kv = parse_kv(rest)?;
+                out.push_str("[[effects]]\ntype = \"reverb\"\n");
+                write_mapped(
+                    &mut out,
+                    &kv,
+                    &[
+                        ("roomsize", "room_size"),
+                        ("decay", "decay"),
+                        ("damping", "damping"),
+                        ("bandwidth", "bandwidth"),
+                        ("density", "density"),
+                        ("lat5", "lat5"),
+                        ("lat6", "lat6"),
+                        ("predelay", "pre_delay_ms"),
+                        ("motionrate", "motion_rate"),
+                        ("motiondepth", "motion_depth_ms"),
+                        ("wet", "wet"),
+                        ("dry", "dry"),
+                    ],
+                );
+                out.push('\n');
+            }
+            "maximizer" => {
+                let kv = parse_kv(rest)?;
+                out.push_str("[[effects]]\ntype = \"maximizer\"\n");
+                write_mapped(
+                    &mut out,
+                    &kv,
+                    &[
+                        ("gainboost", "gain_boost_db"),
+                        ("maxoutput", "max_output_db"),
+                        ("release", "release_ms"),
+                        ("target", "target"),
+                        ("lookahead", "lookahead_ms"),
+                        ("dither", "dither"),
+                        ("wet", "wet"),
+                        ("dry", "dry"),
+                    ],
+                );
+                out.push('\n');
+            }
+            "loudnesscorrection" => {
+                let mut it = rest.split_whitespace();
+                let phon = it.next().ok_or_else(|| "LoudnessCorrection 缺少 phon".to_string())?;
+                let reference = it.next().unwrap_or("80");
+                out.push_str(&format!(
+                    "[[effects]]\ntype = \"loudness\"\nphon = {phon}\nreference_phon = {reference}\n\n"
+                ));
+            }
+            other => println!("⚠ 命令 {other}: 不再支持，跳过（请手动迁移）"),
+        }
+    }
+    Ok(out)
+}
+
+/// 解析 `Key Value [unit]` 对（键小写，单位跳过）。
+fn parse_kv(rest: &str) -> Result<std::collections::HashMap<String, String>, String> {
+    let toks: Vec<&str> = rest.split_whitespace().collect();
+    let mut map = std::collections::HashMap::new();
+    let mut i = 0;
+    while i < toks.len() {
+        let key = toks[i].to_ascii_lowercase();
+        let Some(&val) = toks.get(i + 1) else {
+            break;
+        };
+        i += 2;
+        map.insert(key, val.to_string());
+        if toks
+            .get(i)
+            .is_some_and(|t| t.eq_ignore_ascii_case("hz") || t.eq_ignore_ascii_case("db") || t.eq_ignore_ascii_case("ms"))
+        {
+            i += 1;
+        }
+    }
+    Ok(map)
+}
+
+fn write_mapped(
+    out: &mut String,
+    kv: &std::collections::HashMap<String, String>,
+    map: &[(&str, &str)],
+) {
+    for (k, dst) in map {
+        if let Some(v) = kv.get(*k) {
+            out.push_str(&format!("{dst} = {v}\n"));
+        }
+    }
 }
 
 // ══════════════════════════════════════════════════════════════════════════════

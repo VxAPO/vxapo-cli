@@ -412,6 +412,16 @@ fn parse_install(args: &[String]) -> (String, Option<String>, bool) {
 /// config 子命令：`config set -d <device> -f <file>` / `config show -d <device>`。
 fn run_config(args: &[String]) -> Result<(), String> {
     let sub = args.first().map(|s| s.as_str()).unwrap_or("");
+    if sub == "convert" {
+        let src = args.get(1).map(|s| s.as_str()).unwrap_or("");
+        if src.is_empty() {
+            return Err(
+                "config convert 需要源文件：vxapo-cli config convert <old.txt> [out.toml]"
+                    .to_string(),
+            );
+        }
+        return commands::config_convert(src, args.get(2).map(|s| s.as_str()));
+    }
     let (guid, file) = parse_device_file(&args[1..]);
     match sub {
         "set" => {
@@ -422,7 +432,7 @@ fn run_config(args: &[String]) -> Result<(), String> {
             }
         }
         "show" => commands::config_show(&guid),
-        _ => Err("config 子命令：set / show".to_string()),
+        _ => Err("config 子命令：set / show / convert".to_string()),
     }
 }
 
