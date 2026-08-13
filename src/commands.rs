@@ -242,10 +242,22 @@ pub fn list_devices(json: bool) -> Result<(), String> {
     let devices = enumerate_devices().map_err(|e| format!("枚举设备失败：{e}"))?;
     if json {
         let mut parts = Vec::new();
+        let formats: std::collections::HashMap<String, (Option<u32>, Option<u16>, Option<u16>)> =
+            crate::probe::probe_all()
+                .into_iter()
+                .map(|e| (e.guid.to_uppercase(), (e.sample_rate, e.channels, e.bit_depth)))
+                .collect();
         for (i, d) in devices.iter().enumerate() {
             let ep = d.endpoint.as_ref();
             let name = ep.map(|e| e.friendly_name.clone()).unwrap_or_else(|| "(未命名)".to_string());
             let guid = ep.map(|e| e.endpoint_guid.clone()).unwrap_or_default();
+            let (sr, ch, bd) = formats
+                .get(&guid.to_uppercase())
+                .cloned()
+                .unwrap_or((None, None, None));
+            let sr = sr.map(|v| v.to_string()).unwrap_or_else(|| "null".to_string());
+            let ch = ch.map(|v| v.to_string()).unwrap_or_else(|| "null".to_string());
+            let bd = bd.map(|v| v.to_string()).unwrap_or_else(|| "null".to_string());
             let slots: Vec<String> = d.slots.iter().map(|v| match v {
                 vxapo_driver::install::device::slots::SlotValue::Guid(g) => {
                     let gs = format!("{g:?}");
@@ -255,7 +267,7 @@ pub fn list_devices(json: bool) -> Result<(), String> {
                 _ => "null".to_string(),
             }).collect();
             let mut o = format!(
-                "{{\"index\":{i},\"name\":\"{}\",\"guid\":\"{}\",\"installed_version\":\"{}\",\"install_mode\":\"{:?}\",\"slots\":{{\"LFX\":{},\"GFX\":{},\"SFX\":{},\"MFX\":{},\"EFX\":{}}}",
+                "{{\"index\":{i},\"name\":\"{}\",\"guid\":\"{}\",\"installed_version\":\"{}\",\"install_mode\":\"{:?}\",\"slots\":{{\"LFX\":{},\"GFX\":{},\"SFX\":{},\"MFX\":{},\"EFX\":{}}},\"sample_rate\":{sr},\"channels\":{ch},\"bit_depth\":{bd}",
                 json_escape(&name),
                 json_escape(&guid),
                 json_escape(&d.installed_version),
