@@ -237,27 +237,84 @@ pub fn show_device_status(device_ref: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// 查询端点主音量（0.0–1.0，v0.3.2 新增；失败返回 None）。
+fn endpoint_volume(guid: &str) -> Option<f32> {
+    use windows::Win32::Media::Audio::{
+        EDataFlow, IMMDeviceEnumerator, MMDeviceEnumerator, DEVICE_STATE_ACTIVE,
+    };
+    use windows::Win32::Media::Audio::Endpoints::IAudioEndpointVolume;
+    use windows::Win32::System::Com::{CoCreateInstance, CoInitializeEx, CLSCTX_ALL, COINIT_MULTITHREADED};
+
+    unsafe {
+        let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
+        let enumerator: IMMDeviceEnumerator =
+            CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL).ok()?;
+        let needle = guid.to_ascii_uppercase();
+        for flow in [EDataFlow(0), EDataFlow(1)] {
+            let collection = enumerator.EnumAudioEndpoints(flow, DEVICE_STATE_ACTIVE).ok()?;
+            let count = collection.GetCount().ok()?;
+            for i in 0..count {
+                let device = collection.Item(i).ok()?;
+                let id = device.GetId().ok()?;
+                if id
+                    .to_string()
+                    .unwrap_or_default()
+                    .to_ascii_uppercase()
+                    .contains(&needle)
+                {
+                    let volume: IAudioEndpointVolume =
+                        device.Activate(CLSCTX_ALL, Some(std::ptr::null())).ok()?;
+                    return volume.GetMasterVolumeLevelScalar().ok();
+                }
+            }
+        }
+        None
+    }
+}
+
 /// 打印设备列表 + 槽位占用（包含 4.5 友好名 + 槽位失守标注，CLI 引用规范 5.2 status/list）。
 pub fn list_devices(json: bool) -> Result<(), String> {
     let devices = enumerate_devices().map_err(|e| format!("枚举设备失败：{e}"))?;
     if json {
         let mut parts = Vec::new();
-        let formats: std::collections::HashMap<String, (Option<u32>, Option<u16>, Option<u16>)> =
+        let formats: std::collections::HashMap<String, (Option<u32>, Option<u16>, Option<u16>, &'static str)> =
             crate::probe::probe_all()
                 .into_iter()
-                .map(|e| (e.guid.to_uppercase(), (e.sample_rate, e.channels, e.bit_depth)))
+                .map(|e| {
+                    let kind = if matches!(e.kind, crate::endpoint::EndpointKind::Capture) {
+                        "capture"
+                    } else {
+                        "playback"
+                    };
+                    (e.guid.to_uppercase(), (e.sample_rate, e.channels, e.bit_depth, kind))
+                })
                 .collect();
         for (i, d) in devices.iter().enumerate() {
             let ep = d.endpoint.as_ref();
             let name = ep.map(|e| e.friendly_name.clone()).unwrap_or_else(|| "(未命名)".to_string());
             let guid = ep.map(|e| e.endpoint_guid.clone()).unwrap_or_default();
-            let (sr, ch, bd) = formats
+            let (sr, ch, bd, _k) = formats
                 .get(&guid.to_uppercase())
                 .cloned()
-                .unwrap_or((None, None, None));
+                .unwrap_or((None, None, None, "playback"));
             let sr = sr.map(|v| v.to_string()).unwrap_or_else(|| "null".to_string());
             let ch = ch.map(|v| v.to_string()).unwrap_or_else(|| "null".to_string());
             let bd = bd.map(|v| v.to_string()).unwrap_or_else(|| "null".to_string());
+            let kind = match ep.map(|e| e.flow as u8) {
+                Some(1) => "capture",
+                _ => "playback",
+            };
+            let kind = formats
+                .get(&guid.to_uppercase())
+                .map(|(_, _, _, k)| *k)
+                .unwrap_or(kind);
+            let volume = if guid.is_empty() {
+                "null".to_string()
+            } else {
+                endpoint_volume(&guid)
+                    .map(|v| format!("{:.3}", v))
+                    .unwrap_or_else(|| "null".to_string())
+            };
             let slots: Vec<String> = d.slots.iter().map(|v| match v {
                 vxapo_driver::install::device::slots::SlotValue::Guid(g) => {
                     let gs = format!("{g:?}");
@@ -267,7 +324,7 @@ pub fn list_devices(json: bool) -> Result<(), String> {
                 _ => "null".to_string(),
             }).collect();
             let mut o = format!(
-                "{{\"index\":{i},\"name\":\"{}\",\"guid\":\"{}\",\"installed_version\":\"{}\",\"install_mode\":\"{:?}\",\"slots\":{{\"LFX\":{},\"GFX\":{},\"SFX\":{},\"MFX\":{},\"EFX\":{}}},\"sample_rate\":{sr},\"channels\":{ch},\"bit_depth\":{bd}",
+                "{{\"index\":{i},\"name\":\"{}\",\"guid\":\"{}\",\"installed_version\":\"{}\",\"install_mode\":\"{:?}\",\"slots\":{{\"LFX\":{},\"GFX\":{},\"SFX\":{},\"MFX\":{},\"EFX\":{}}},\"sample_rate\":{sr},\"channels\":{ch},\"bit_depth\":{bd},\"kind\":\"{kind}\",\"volume\":{volume}",
                 json_escape(&name),
                 json_escape(&guid),
                 json_escape(&d.installed_version),

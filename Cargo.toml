@@ -1,9 +1,17 @@
 [package]
 name = "vxapo-cli"
-version = "0.3.1"
+version = "0.3.2"
 edition = "2021"
 
 [dependencies]
 winreg = "0.52"
 vxapo-driver = { path = "../vxapo-driver" }
-windows = { version = "0.62.2", features = ["Win32_System_Registry", "Win32_Foundation"] }
+windows = { version = "0.62.2", features = [
+  "Win32_System_Registry",
+  "Win32_Foundation",
+  "Win32_Media_Audio",
+  "Win32_Media_Audio_Endpoints",
+  "Win32_System_Com",
+  "Win32_System_Com_StructuredStorage",
+  "Win32_System_Ole",
+] }
