@@ -14,6 +14,26 @@ use vxapo_driver::object::vx_reg_props::{CLSID_VXAPO_POST_MIX, CLSID_VXAPO_PRE_M
 
 use crate::knowledge::KNOWN_APO_CLSIDS;
 
+/// JSON 字符串转义（v0.3.0，无依赖手写最小实现）。
+pub(crate) fn json_escape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 8);
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if (c as u32) < 0x20 => {
+                use std::fmt::Write;
+                let _ = write!(out, "\\u{:04x}", c as u32);
+            }
+            c => out.push(c),
+        }
+    }
+    out
+}
+
 /// 定位 exe 同级 vxapo_driver.dll 并自动注册 COM 类（新机器无绑定）。
 ///
 /// 新开发者拿到 CLI + driver 二进制直接 `install` 时，注册表里没有 CLSID 绑定
@@ -218,8 +238,44 @@ pub fn show_device_status(device_ref: &str) -> Result<(), String> {
 }
 
 /// 打印设备列表 + 槽位占用（包含 4.5 友好名 + 槽位失守标注，CLI 引用规范 5.2 status/list）。
-pub fn list_devices() -> Result<(), String> {
+pub fn list_devices(json: bool) -> Result<(), String> {
     let devices = enumerate_devices().map_err(|e| format!("枚举设备失败：{e}"))?;
+    if json {
+        let mut parts = Vec::new();
+        for (i, d) in devices.iter().enumerate() {
+            let ep = d.endpoint.as_ref();
+            let name = ep.map(|e| e.friendly_name.clone()).unwrap_or_else(|| "(未命名)".to_string());
+            let guid = ep.map(|e| e.endpoint_guid.clone()).unwrap_or_default();
+            let slots: Vec<String> = d.slots.iter().map(|v| match v {
+                vxapo_driver::install::device::slots::SlotValue::Guid(g) => {
+                    let gs = format!("{g:?}");
+                    let label = slot_friendly(&gs).unwrap_or_else(|| gs.clone());
+                    format!("\"{}\"", json_escape(&label))
+                }
+                _ => "null".to_string(),
+            }).collect();
+            let mut o = format!(
+                "{{\"index\":{i},\"name\":\"{}\",\"guid\":\"{}\",\"installed_version\":\"{}\",\"install_mode\":\"{:?}\",\"slots\":{{\"LFX\":{},\"GFX\":{},\"SFX\":{},\"MFX\":{},\"EFX\":{}}}",
+                json_escape(&name),
+                json_escape(&guid),
+                json_escape(&d.installed_version),
+                d.install_mode,
+                slots[0], slots[1], slots[2], slots[3], slots[4],
+            );
+            if let Some(eapo) = detect_eapo_status(&d.slots) {
+                o.push_str(&format!(",\"eapo\":\"{}\"", json_escape(&eapo)));
+            }
+            if !guid.is_empty() && child_apo_key_exists(&guid) {
+                if let Some(lost) = detect_lost_slot(&d.slots, d.install_mode) {
+                    o.push_str(&format!(",\"lost_slot\":\"{}\"", json_escape(&lost)));
+                }
+            }
+            o.push('}');
+            parts.push(o);
+        }
+        println!("[{}]", parts.join(","));
+        return Ok(());
+    }
     if devices.is_empty() {
         println!("（无音频端点）");
         return Ok(());
@@ -327,7 +383,7 @@ fn slot_friendly(clsid: &str) -> Option<String> {
 }
 
 /// install 命令（CLI 引用规范 5.1）。
-pub fn install(device_ref: &str, mode: Option<&str>, no_child: bool) -> Result<(), String> {
+pub fn install(device_ref: &str, mode: Option<&str>, no_child: bool, json: bool) -> Result<(), String> {
     require_admin()?;
     let dev = resolve_device(device_ref)?;
     let mut config = InstallConfig::default_config();
@@ -345,7 +401,9 @@ pub fn install(device_ref: &str, mode: Option<&str>, no_child: bool) -> Result<(
         None => {
             config.install_mode =
                 vxapo_driver::install::device::info::detect_mode_for_guid(&dev.guid);
-            println!("▶ 自动探测安装模式：{:?}", config.install_mode);
+            if !json {
+                println!("▶ 自动探测安装模式：{:?}", config.install_mode);
+            }
         }
     }
     config.use_original_apo_premix = !no_child;
@@ -353,7 +411,9 @@ pub fn install(device_ref: &str, mode: Option<&str>, no_child: bool) -> Result<(
 
     // 快照基线（安装前建立/替换，Phase C——只注册表，config 不属 CLI 快照）。
     if let Err(e) = snapshot_device(&dev.guid, true) {
-        println!("⚠ 快照建立失败（继续安装）：{e}");
+        if !json {
+            println!("⚠ 快照建立失败（继续安装）：{e}");
+        }
     }
 
     // 每次安装都刷新全局 APO 注册（幂等）。
@@ -365,7 +425,15 @@ pub fn install(device_ref: &str, mode: Option<&str>, no_child: bool) -> Result<(
     // 均由 driver install_endpoint 全流程处理（CLI 不再重复）。
     install_endpoint(&dev.guid, &dev.name, &dev.connection, &config, true)
         .map_err(|e| format!("install_endpoint 失败：{e}（可用 vxapo-cli snapshot diff -d {guid} 查看变更）", guid = dev.guid))?;
-    println!("✓ 已安装 {}（模式 {:?}，子 APO 保留={}）", dev.guid, config.install_mode, !no_child);
+    if json {
+        println!(
+            "{{\"ok\":true,\"device\":\"{}\",\"mode\":\"{:?}\",\"message\":\"已安装\"}}",
+            json_escape(&dev.guid),
+            config.install_mode
+        );
+    } else {
+        println!("✓ 已安装 {}（模式 {:?}，子 APO 保留={}）", dev.guid, config.install_mode, !no_child);
+    }
 
     // per-device config.toml 检查（方案 A）：缺失时**自动从 exe 同级 .\config.toml 导入**，
     // 避免「装完发现没配置」。约定：把 config.txt 放在 vxapo-cli.exe 同目录即可，
@@ -388,19 +456,33 @@ pub fn install(device_ref: &str, mode: Option<&str>, no_child: bool) -> Result<(
                             let _ = std::fs::create_dir_all(parent);
                         }
                         match std::fs::write(&path, &src) {
-                            Ok(()) => println!(
-                                "📄 已自动导入 {} → {}",
-                                default_src.display(),
-                                path
-                            ),
-                            Err(e) => println!("⚠ 自动导入失败：{e}"),
+                            Ok(()) => {
+                                if !json {
+                                    println!(
+                                        "📄 已自动导入 {} → {}",
+                                        default_src.display(),
+                                        path
+                                    );
+                                }
+                            }
+                            Err(e) => {
+                                if !json {
+                                    println!("⚠ 自动导入失败：{e}");
+                                }
+                            }
                         }
                     }
-                    Err(e) => println!("⚠ 读取 {} 失败：{e}", default_src.display()),
+                    Err(e) => {
+                        if !json {
+                            println!("⚠ 读取 {} 失败：{e}", default_src.display());
+                        }
+                    }
                 }
             } else {
-                println!("⚠ 未检测到 config.toml（{path}），APO 将按无配置运行。");
-                println!("   请用 config set 写入：vxapo-cli config set -d <device> -f <你的配置文件>");
+                if !json {
+                    println!("⚠ 未检测到 config.toml（{path}），APO 将按无配置运行。");
+                    println!("   请用 config set 写入：vxapo-cli config set -d <device> -f <你的配置文件>");
+                }
             }
         }
     }
@@ -410,7 +492,7 @@ pub fn install(device_ref: &str, mode: Option<&str>, no_child: bool) -> Result<(
 }
 
 /// uninstall 命令（CLI 引用规范 5.3）。
-pub fn uninstall(device_ref: &str) -> Result<(), String> {
+pub fn uninstall(device_ref: &str, json: bool) -> Result<(), String> {
     require_admin()?;
     let dev = resolve_device(device_ref)?;
     if !snapshot_exists(&dev.guid) {
@@ -419,7 +501,9 @@ pub fn uninstall(device_ref: &str) -> Result<(), String> {
     // 卸载前确保 audiodg 进程退出：audiodg 持有点端会**锁 MMDevices 槽位键句柄**，
     // 先经 driver SCM 停服务（30s 超时，不会挂死）+ taskkill 兜底杀残留 audiodg，
     // 保证槽位值可删（2026-08-05：改用 SCM 替代 net stop——后者在服务未跑时可能挂起）。
-    println!("  停止音频服务 + 终止 audiodg（卸载前置）…");
+    if !json {
+        println!("  停止音频服务 + 终止 audiodg（卸载前置）…");
+    }
     let _ = vxapo_driver::install::audiodg::stop_audio_service();
     let _ = std::process::Command::new("taskkill")
         .args(["/f", "/im", "audiodg.exe"])
@@ -450,11 +534,15 @@ pub fn uninstall(device_ref: &str) -> Result<(), String> {
         return Err(format!("卸载后检测到 {residual} 个槽位残留 VxAPO CLSID——音频进程可能仍占用，请重试。"));
     }
 
-    print!("✓ 已卸载 {}。", dev.guid);
-    if let Ok(diff) = snapshot_diff(&dev.guid) {
-        println!(" 变更统计：{diff}");
+    if json {
+        println!("{{\"ok\":true,\"device\":\"{}\",\"message\":\"已卸载\"}}", json_escape(&dev.guid));
     } else {
-        println!();
+        print!("✓ 已卸载 {}。", dev.guid);
+        if let Ok(diff) = snapshot_diff(&dev.guid) {
+            println!(" 变更统计：{diff}");
+        } else {
+            println!();
+        }
     }
 
     Ok(())

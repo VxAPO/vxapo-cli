@@ -32,15 +32,18 @@ fn main() {
 
 /// 子命令分派（返回进程退出码：0 成功 / 1 失败）。
 fn run_subcommand(args: &[String]) -> i32 {
+    // v0.3.0：--json 机器可读输出（WinUI 3 集成用）。从参数中剥离，不影响原有解析。
+    let json = args.iter().any(|a| a == "--json");
+    let args: Vec<String> = args.iter().filter(|a| *a != "--json").cloned().collect();
     let cmd = args[0].as_str();
     let result = match cmd {
-        "list" | "status" => commands::list_devices(),
+        "list" | "status" => commands::list_devices(json),
         "install" => {
             let (dev, mode, no_child) = parse_install(&args[1..]);
             if dev.is_empty() {
                 Err("install 用法：vxapo-cli install -d <device> [--mode LfxGfx|SfxMfx|SfxEfx] [--no-child]".to_string())
             } else {
-                commands::install(&dev, mode.as_deref(), no_child)
+                commands::install(&dev, mode.as_deref(), no_child, json)
             }
         }
         "uninstall" => {
@@ -64,7 +67,7 @@ fn run_subcommand(args: &[String]) -> i32 {
             if dev.is_empty() {
                 Err("uninstall 用法：vxapo-cli uninstall -d <device>".to_string())
             } else {
-                commands::uninstall(&dev)
+                commands::uninstall(&dev, json)
             }
         }
         "config" => {
@@ -90,7 +93,11 @@ fn run_subcommand(args: &[String]) -> i32 {
     match result {
         Ok(()) => 0,
         Err(e) => {
-            eprintln!("✗ {e}");
+            if json {
+                println!("{{\"ok\":false,\"error\":\"{}\"}}", commands::json_escape(&e));
+            } else {
+                eprintln!("✗ {e}");
+            }
             1
         }
     }
@@ -168,7 +175,7 @@ fn viewer_detail(ep: &endpoint::Endpoint) -> bool {
 /// `q` 返回模式选择。
 fn driver_mode() {
     loop {
-        match commands::list_devices() {
+        match commands::list_devices(false) {
             Ok(()) => {}
             Err(e) => println!("✗ {e}"),
         }
@@ -222,7 +229,7 @@ fn driver_device_menu(dev_idx: &usize) -> bool {
             }
             "i" => install_and_guide(&dev, *dev_idx),
             "u" => {
-                match commands::uninstall(&dev.guid) {
+                match commands::uninstall(&dev.guid, false) {
                     Ok(()) => println!("✓ 卸载完成"),
                     Err(e) => {
                         println!("✗ {e}");
@@ -317,7 +324,7 @@ fn install_and_guide(dev: &commands::DeviceRef, dev_idx: usize) {
     }
 
     let no_child = !keep_child;
-    match commands::install(&dev.guid, None, no_child) {
+    match commands::install(&dev.guid, None, no_child, false) {
         Ok(()) => {
             println!("✓ 安装完成（模式 SfxEfx，子 APO 保留={keep_child}）。");
             println!("  调音：导入 config.txt（默认读 exe 同级 .\\config.txt，可用 config set 指定别的路径）：");
