@@ -15,9 +15,16 @@ mod endpoint;
 mod knowledge;
 mod probe;
 mod reg;
+mod i18n;
 mod regdump;
 
 use std::io::Write;
+
+use i18n::{Lang, lang, set_lang, tr};
+
+macro_rules! tr {
+    ($zh:expr, $en:expr) => { i18n::tr($zh, $en) };
+}
 
 use app::App;
 
@@ -107,25 +114,42 @@ fn run_subcommand(args: &[String]) -> i32 {
 // 交互式终端菜单（无参数启动 / 双击 release exe）
 // ══════════════════════════════════════════════════════════════════════════════
 
-/// 模式选择层：1 查看模式（自研枚举+槽位诊断） / 2 Driver 模式（install 层操作）/ q 退出。
+/// 选择界面语言，然后进入模式选择。
+fn choose_language() {
+    println!("VxAPO CLI");
+    println!("================================\n");
+    println!("Select language / 选择语言:");
+    println!("  [1] English");
+    println!("  [2] 中文");
+    print!("> ");
+    match read_line().as_str() {
+        "1" => set_lang(Lang::En),
+        _ => set_lang(Lang::Zh),
+    }
+    println!();
+}
+
+/// 模式选择层：1 查看模式 / 2 Driver 模式 / q 退出。
 fn interactive() {
-    println!("VxAPO CLI — 音频处理调试工具");
+    choose_language();
+
+    println!("{}", tr!("VxAPO CLI — 音频处理调试工具", "VxAPO CLI - audio processing debug tool"));
     println!("================================\n");
 
     loop {
-        println!("--- 选择模式 ---");
-        println!("  [1] 查看模式：自研枚举 + 槽位/格式/增强诊断（probe 自身能力）");
-        println!("  [2] Driver 模式：安装/卸载/配置/快照（install 层）");
-        println!("  [q] 退出");
+        println!("{}", tr!("--- 选择模式 ---", "--- Select mode ---"));
+        println!("  [1] {}", tr!("查看模式：自研枚举 + 槽位/格式/增强诊断（probe 自身能力）", "Viewer mode: built-in enumeration + slot/format/enhancement diagnostics"));
+        println!("  [2] {}", tr!("Driver 模式：安装/卸载/配置/快照（install 层）", "Driver mode: install/uninstall/config/snapshot"));
+        println!("  [q] {}", tr!("退出", "Quit"));
         print!("> ");
         match read_line().as_str() {
             "1" => viewer_mode(),
             "2" => driver_mode(),
             "q" | "quit" | "exit" => break,
-            _ => println!("未知输入（1 / 2 / q）"),
+            _ => println!("{}", tr!("未知输入（1 / 2 / q）", "Unknown input (1 / 2 / q)")),
         }
     }
-    println!("再见。");
+    println!("{}", tr!("再见。", "Goodbye."));
 }
 
 /// 查看模式：probe 自身全量枚举（active、去重、格式）+ 设备详情诊断。
@@ -134,13 +158,18 @@ fn viewer_mode() {
     let mut app = App::new();
     loop {
         app.refresh();
-        println!("\n--- 查看模式：自研枚举（{} 端点）---", app.endpoints.len());
+        let title = if lang() == Lang::En {
+            format!("--- Viewer mode: built-in enumeration ({} endpoints) ---", app.endpoints.len())
+        } else {
+            format!("--- 查看模式：自研枚举（{} 端点）---", app.endpoints.len())
+        };
+        println!("\n{title}");
         if app.endpoints.is_empty() {
-            println!("（无音频端点）");
+            println!("{}", tr!("（无音频端点）", "(no audio endpoints)"));
         } else {
             display::print_endpoints(&app.endpoints);
         }
-        println!("  [序号] 查看详情  [r] 刷新  [q] 回模式选择");
+        println!("  [{}] {}  [r] {}  [q] {}", tr!("序号", "index"), tr!("查看详情", "view details"), tr!("刷新", "refresh"), tr!("回模式选择", "back to mode selection"));
         print!("> ");
         match read_line().as_str() {
             "q" | "quit" | "exit" => break,
@@ -149,21 +178,21 @@ fn viewer_mode() {
                 if let Ok(idx) = input.parse::<usize>() {
                     if let Some(ep) = app.endpoints.get(idx) {
                         if viewer_detail(ep) {
-                            break; // exit → 回模式选择
+                            break;
                         }
                         continue;
                     }
                 }
-                println!("未知输入：{input}");
+                println!("{}", tr!("未知输入：", "Unknown input: "));
             }
         }
     }
 }
 
-/// 设备详情页（查看模式）：槽位/格式/增强等全量诊断。返回 true=回模式选择。
+/// 设备详情页（查看模式）。返回 true=回模式选择。
 fn viewer_detail(ep: &endpoint::Endpoint) -> bool {
     display::print_detail_header(ep);
-    println!("  [b] 返回列表  [q] 回模式选择");
+    println!("  [b] {}  [q] {}", tr!("返回列表", "back to list"), tr!("回模式选择", "back to mode selection"));
     print!("> ");
     match read_line().as_str() {
         "q" | "quit" | "exit" => true,
@@ -171,29 +200,27 @@ fn viewer_detail(ep: &endpoint::Endpoint) -> bool {
     }
 }
 
-/// Driver 模式：install 层设备列表（版本/模式/5 槽位/失守）+ 设备操作菜单。
-/// `q` 返回模式选择。
+/// Driver 模式：install 层设备列表 + 设备操作菜单。
 fn driver_mode() {
     loop {
         match commands::list_devices(false) {
             Ok(()) => {}
             Err(e) => println!("✗ {e}"),
         }
-        println!("\n--- Driver 模式 ---");
-        println!("  [序号] 选择设备（install/uninstall/config/snapshot/转储）");
-        println!("  [q] 回模式选择");
+        println!("\n{}", tr!("--- Driver 模式 ---", "--- Driver mode ---"));
+        println!("  [{}] {}（install/uninstall/config/snapshot/转储）", tr!("序号", "index"), tr!("选择设备", "select device"));
+        println!("  [q] {}", tr!("回模式选择", "back to mode selection"));
         print!("> ");
         match read_line().as_str() {
             "q" | "quit" | "exit" => break,
             input => {
                 if let Ok(idx) = input.parse::<usize>() {
-                    // 返回 true=设备子菜单里 q 了 → 退出 Driver 模式回模式选择。
                     if driver_device_menu(&idx) {
                         break;
                     }
                     continue;
                 }
-                println!("未知输入：{input}");
+                println!("{}", tr!("未知输入：", "Unknown input: "));
             }
         }
     }
@@ -202,7 +229,6 @@ fn driver_mode() {
 /// 设备子菜单（Driver 模式）：install/uninstall/config/snapshot/转储。
 ///
 /// 返回：`true` = 用户按 `q` 回模式选择；`false` = 返回设备列表（b）。
-/// `b` 返回设备列表；`q` 回模式选择；`h` 呼出帮助。
 fn driver_device_menu(dev_idx: &usize) -> bool {
     let dev = match resolve_device_ref(*dev_idx) {
         Ok(d) => d,
@@ -211,14 +237,14 @@ fn driver_device_menu(dev_idx: &usize) -> bool {
             return false;
         }
     };
-    // 每次进入重新枚举 probe，供注册表转储按 GUID 匹配端点（driver 序号 ≠ probe 序号）。
+    // 每次进入重新枚举 probe，供注册表转储按 GUID 匹配端点。
     let mut app = App::new();
     app.refresh();
     loop {
-        println!("\n--- 设备 {dev_idx}：{} ---", dev.name);
-        println!("  [i] 安装       [u] 卸载        [c] 配置管理     [h] 帮助");
-        println!("  [p] 快照 diff  [r] 快照恢复    [x] 转储注册表");
-        println!("  [s] 状态详情   [b] 返回列表    [q] 回模式选择");
+        println!("\n--- {} {dev_idx}：{} ---", tr!("设备", "Device"), dev.name);
+        println!("  [i] {}  [u] {}  [c] {}  [h] {}", tr!("安装", "Install"), tr!("卸载", "Uninstall"), tr!("配置管理", "Config"), tr!("帮助", "Help"));
+        println!("  [p] {}  [r] {}  [x] {}", tr!("快照 diff", "Snapshot diff"), tr!("快照恢复", "Snapshot restore"), tr!("转储注册表", "Dump registry"));
+        println!("  [s] {}  [b] {}  [q] {}", tr!("状态详情", "Status"), tr!("返回列表", "Back to list"), tr!("回模式选择", "Back to mode selection"));
         print!("> ");
         match read_line().as_str() {
             "b" | "" => return false,
@@ -230,10 +256,10 @@ fn driver_device_menu(dev_idx: &usize) -> bool {
             "i" => install_and_guide(&dev, *dev_idx),
             "u" => {
                 match commands::uninstall(&dev.guid, false) {
-                    Ok(()) => println!("✓ 卸载完成"),
+                    Ok(()) => println!("{}", tr!("✓ 卸载完成", "✓ Uninstall complete")),
                     Err(e) => {
                         println!("✗ {e}");
-                        println!("   子命令对照：vxapo-cli uninstall -d {}", dev.guid);
+                        println!("   {}: vxapo-cli uninstall -d {}", tr!("子命令对照", "Subcommand"), dev.guid);
                     }
                 }
             }
@@ -246,7 +272,7 @@ fn driver_device_menu(dev_idx: &usize) -> bool {
             }
             "r" => {
                 match commands::snapshot_restore(&dev.guid) {
-                    Ok(()) => println!("✓ 恢复完成"),
+                    Ok(()) => println!("{}", tr!("✓ 恢复完成", "✓ Restore complete")),
                     Err(e) => println!("✗ {e}"),
                 }
             }
@@ -254,19 +280,17 @@ fn driver_device_menu(dev_idx: &usize) -> bool {
                 if let Some(ep) = app.endpoints.iter().find(|e| e.guid.eq_ignore_ascii_case(&dev.guid)) {
                     regdump::dump_endpoint(ep);
                 } else {
-                    println!("✗ 该设备不在 probe 枚举中（GUID 不匹配/非 active）");
+                    println!("{}", tr!("✗ 该设备不在 probe 枚举中（GUID 不匹配/非 active）", "✗ Device not found in probe enumeration (GUID mismatch or not active)"));
                 }
             }
             "s" => {
-                // 单设备状态：槽位 + childApo 信息区（要求——只显示当前设备）。
                 match commands::show_device_status(&dev_idx.to_string()) {
                     Ok(()) => {}
                     Err(e) => println!("✗ {e}"),
                 }
             }
             input => {
-                // 子命令直通：菜单内可直接执行子命令（交互与子命令结合）。
-                // 兼容两种输入：直接打 `install -d 0`，或粘贴 `vxapo-cli install -d 0`（剥前缀）。
+                // 子命令直通：菜单内可直接执行子命令。
                 let line = input.trim();
                 let line = line
                     .strip_prefix("vxapo-cli")
@@ -277,7 +301,12 @@ fn driver_device_menu(dev_idx: &usize) -> bool {
                     .map(|s| s.to_string())
                     .collect();
                 if args.is_empty() {
-                    println!("未知输入（i/u/c/p/r/x/s/b/q/h，或直接打子命令如 install -d {dev_idx}）");
+                    let msg = if lang() == Lang::En {
+                        format!("Unknown input (i/u/c/p/r/x/s/b/q/h, or type a subcommand like install -d {dev_idx})")
+                    } else {
+                        format!("未知输入（i/u/c/p/r/x/s/b/q/h，或直接打子命令如 install -d {dev_idx}）")
+                    };
+                    println!("{msg}");
                 } else {
                     let known = matches!(
                         args[0].as_str(),
@@ -286,10 +315,15 @@ fn driver_device_menu(dev_idx: &usize) -> bool {
                     if known {
                         let code = run_subcommand(&args);
                         if code != 0 {
-                            println!("  子命令执行失败（退出码 {code}）。可用 help 查看用法。");
+                            println!("  {} {code}。{}", tr!("子命令执行失败（退出码", "Subcommand failed (exit code"), tr!("可用 help 查看用法。", "Use help for usage."));
                         }
                     } else {
-                        println!("未知输入：{input}（支持 i/u/c/p/r/x/s/b/q/h，或直接打子命令如 install -d {dev_idx}）");
+                        let msg = if lang() == Lang::En {
+                            format!("Unknown input: {input} (Supported: i/u/c/p/r/x/s/b/q/h, or type a subcommand like install -d {dev_idx})")
+                        } else {
+                            format!("未知输入：{input}（支持 i/u/c/p/r/x/s/b/q/h，或直接打子命令如 install -d {dev_idx}）")
+                        };
+                        println!("{msg}");
                     }
                 }
             }
@@ -297,44 +331,42 @@ fn driver_device_menu(dev_idx: &usize) -> bool {
     }
 }
 
-/// 安装并引导（交互模式）：先展示槽位占用预览，询问是否保留现有 APO 为子 APO，
-/// 再确认执行安装。完成后提示导入 config.txt 调音配置。
+/// 安装并引导（交互模式）。
 fn install_and_guide(dev: &commands::DeviceRef, dev_idx: usize) {
-    println!("  正在准备安装到 [{dev_idx}] {}…", dev.name);
+    println!("  {} [{dev_idx}] {}…", tr!("正在准备安装到", "Preparing to install to"), dev.name);
 
-    // 槽位占用预览（当前谁占着 PreMix/PostMix）。
     match commands::preview_install(&dev_idx.to_string()) {
         Ok(preview) => println!("{preview}"),
-        Err(e) => println!("⚠ 预览失败（继续安装）：{e}"),
+        Err(e) => println!("⚠ {}：{e}", tr!("预览失败（继续安装）", "Preview failed (continuing)")),
     }
-    println!("  安装将把 VxAPO 写入 PreMix+PostMix 槽位（默认 SfxEfx 模式）。");
+    println!("  {}", tr!("安装将把 VxAPO 写入 PreMix+PostMix 槽位（默认 SfxEfx 模式）。", "Install will write VxAPO to PreMix+PostMix slots (default SfxEfx mode)."));
 
-    // 询问是否保留现有 APO 为子 APO（默认保留，回车进入确认）。
-    print!("  保留现有 APO 为子 APO？（y=保留 / n=不保留 / 回车=保留）> ");
+    print!("  {}（y={} / n={} / {}=）> ", tr!("保留现有 APO 为子 APO？", "Keep existing APO as child APO?"), tr!("保留", "keep"), tr!("不保留", "discard"), tr!("回车=保留", "Enter=keep"));
     std::io::stdout().flush().unwrap();
     let keep = read_line();
     let keep_child = keep.trim().to_ascii_lowercase() != "n";
 
-    print!("  开始安装（模式 SfxEfx）？按回车确认 / q 取消 > ");
+    print!("  {}？{} / q {} > ", tr!("开始安装（模式 SfxEfx）", "Start install (SfxEfx)"), tr!("按回车确认", "Press Enter to confirm"), tr!("取消", "cancel"));
     std::io::stdout().flush().unwrap();
     let confirm = read_line();
     if confirm.trim().to_ascii_lowercase() == "q" {
-        println!("已取消。");
+        println!("{}", tr!("已取消。", "Cancelled."));
         return;
     }
 
     let no_child = !keep_child;
     match commands::install(&dev.guid, None, no_child, false) {
         Ok(()) => {
-            println!("✓ 安装完成（模式 SfxEfx，子 APO 保留={keep_child}）。");
-            println!("  调音：导入 config.txt（默认读 exe 同级 .\\config.txt，可用 config set 指定别的路径）：");
-            println!("    config set -d {dev_idx} -f .\\config.txt");
-            println!("  查看是否已配置：config show -d {dev_idx}");
+            println!("✓ {}（SfxEfx，{}={keep_child}）。", tr!("安装完成", "Install complete"), tr!("子 APO 保留", "child APO keep"));
+            println!("  {}：", tr!("调音", "Tuning"));
+            println!("    config set -d {dev_idx} -f .\\config.toml");
+            println!("    config show -d {dev_idx}");
         }
         Err(e) => {
-            println!("✗ 安装失败：{e}");
+            println!("✗ {}：{e}", tr!("安装失败", "Install failed"));
             println!(
-                "  可在本菜单直接输入带参数重试：install -d {dev_idx} --mode LfxGfx|SfxMfx|SfxEfx [--no-child]"
+                "  {}：install -d {dev_idx} --mode LfxGfx|SfxMfx|SfxEfx [--no-child]",
+                tr!("可在本菜单直接输入带参数重试", "Retry in this menu with parameters")
             );
         }
     }
@@ -343,9 +375,9 @@ fn install_and_guide(dev: &commands::DeviceRef, dev_idx: usize) {
 /// 配置子菜单：config show / config set。
 fn config_menu(guid: &str) {
     loop {
-        println!("\n--- 配置管理 ---");
-        println!("  [s] 显示 config.txt      [e] 编辑（写文件）");
-        println!("  [b] 返回设备菜单");
+        println!("\n--- {} ---", tr!("配置管理", "Config management"));
+        println!("  [s] {}      [e] {}", tr!("显示 config.toml", "Show config.toml"), tr!("编辑（写文件）", "Edit (write file)"));
+        println!("  [b] {}", tr!("返回设备菜单", "Back to device menu"));
         print!("> ");
         match read_line().as_str() {
             "b" | "" => break,
@@ -356,19 +388,19 @@ fn config_menu(guid: &str) {
                 }
             }
             "e" => {
-                print!("输入源文件路径（内容将原样写入 config.txt）> ");
+                print!("{}> ", tr!("输入源文件路径（内容将原样写入 config.toml）", "Source file path (content will be written to config.toml)"));
                 std::io::stdout().flush().unwrap();
                 let file = read_line();
                 if file.trim().is_empty() {
-                    println!("已取消");
+                    println!("{}", tr!("已取消", "Cancelled"));
                 } else {
                     match commands::config_set(guid, file.trim()) {
-                        Ok(()) => println!("✓ 配置已写入"),
+                        Ok(()) => println!("{}", tr!("✓ 配置已写入", "✓ Config written")),
                         Err(e) => println!("✗ {e}"),
                     }
                 }
             }
-            _ => println!("未知输入（s/e/b）"),
+            _ => println!("{}（s/e/b）", tr!("未知输入", "Unknown input")),
         }
     }
 }
@@ -496,18 +528,35 @@ fn parse_device_file(args: &[String]) -> (String, String) {
 
 /// 命令帮助（子命令模式 / help）。
 fn print_help() {
-    println!("VxAPO CLI — 音频处理端到端验证工具");
-    println!();
-    println!("交互模式：直接运行 vxapo-cli（无参数）→ 终端菜单操作");
-    println!();
-    println!("子命令模式：vxapo-cli <命令> [参数]");
-    println!("  list / status                     列出音频端点 + 槽位占用 + 失守标注");
-    println!("  install -d <device> [--mode LfxGfx|SfxMfx|SfxEfx] [--no-child]");
-    println!("  uninstall -d <device>");
-    println!("  config set -d <device> -f <file>   写 per-device config.txt");
-    println!("  config show -d <device>            读回 config.txt");
-    println!("  snapshot diff -d <device>          基线 vs 当前注册表变更");
-    println!("  snapshot restore -d <device>       恢复基线（清槽位）");
-    println!("  snapshot create -d <device>        建立/替换基线");
-    println!(" <device> = {{GUID}} 或枚举序号（list 查看）");
+    if lang() == Lang::En {
+        println!("VxAPO CLI - audio processing end-to-end verification tool");
+        println!();
+        println!("Interactive mode: run vxapo-cli without arguments");
+        println!();
+        println!("Subcommand mode: vxapo-cli <command> [options]");
+        println!("  list / status                     List audio endpoints + slot usage + lost-slot markers");
+        println!("  install -d <device> [--mode LfxGfx|SfxMfx|SfxEfx] [--no-child]");
+        println!("  uninstall -d <device>");
+        println!("  config set -d <device> -f <file>   Write per-device config.toml");
+        println!("  config show -d <device>            Read back config.toml");
+        println!("  snapshot diff -d <device>          Show registry changes vs baseline");
+        println!("  snapshot restore -d <device>       Restore baseline");
+        println!("  snapshot create -d <device>        Create/replace baseline");
+        println!(" <device> = {{GUID}} or enumeration index (see list)");
+    } else {
+        println!("VxAPO CLI — 音频处理端到端验证工具");
+        println!();
+        println!("交互模式：直接运行 vxapo-cli（无参数）→ 终端菜单操作");
+        println!();
+        println!("子命令模式：vxapo-cli <命令> [参数]");
+        println!("  list / status                     列出音频端点 + 槽位占用 + 失守标注");
+        println!("  install -d <device> [--mode LfxGfx|SfxMfx|SfxEfx] [--no-child]");
+        println!("  uninstall -d <device>");
+        println!("  config set -d <device> -f <file>   写 per-device config.toml");
+        println!("  config show -d <device>            读回 config.toml");
+        println!("  snapshot diff -d <device>          基线 vs 当前注册表变更");
+        println!("  snapshot restore -d <device>       恢复基线（清槽位）");
+        println!("  snapshot create -d <device>        建立/替换基线");
+        println!(" <device> = {{GUID}} 或枚举序号（list 查看）");
+    }
 }
