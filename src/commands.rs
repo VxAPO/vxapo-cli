@@ -54,7 +54,7 @@ fn auto_register_driver() -> Result<(), String> {
         exe_dir.parent().map(|p| p.join("resources").join("vxapo_driver.dll")).unwrap_or_default(),
     ];
     let dll_path = if let Some(dll) = dll_candidates.iter().find(|p| p.exists()) {
-        dll_candidates[0].display().to_string()
+        dll.display().to_string()
     } else if driver_binding_exists() {
         // 已存在 CLSID→DLL 绑定：用注册表里的路径刷新注册。
         // 旧版注册可能缺 AudioEngine\AudioProcessingObjects 键/字段，
