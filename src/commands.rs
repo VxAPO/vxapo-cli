@@ -54,7 +54,7 @@ fn auto_register_driver() -> Result<(), String> {
         exe_dir.parent().map(|p| p.join("resources").join("vxapo_driver.dll")).unwrap_or_default(),
     ];
     let dll_path = if let Some(dll) = dll_candidates.iter().find(|p| p.exists()) {
-        dll.display().to_string()
+        dll_candidates[0].display().to_string()
     } else if driver_binding_exists() {
         // 已存在 CLSID→DLL 绑定：用注册表里的路径刷新注册。
         // 旧版注册可能缺 AudioEngine\AudioProcessingObjects 键/字段，
@@ -73,9 +73,9 @@ fn auto_register_driver() -> Result<(), String> {
     };
     if dll_path.is_empty() {
         if lang() == Lang::En {
-            println!("  ⚠ {} not found (skipping auto-register - no problem if already registered by installer/regsvr32)", dll.display());
+            println!("  ⚠ {} not found (skipping auto-register - no problem if already registered by installer/regsvr32)", dll_candidates[0].display());
         } else {
-            println!("  ⚠ 未找到 {}（跳过自动注册——已由安装器/regsvr32 注册则无碍）", dll.display());
+            println!("  ⚠ 未找到 {}（跳过自动注册——已由安装器/regsvr32 注册则无碍）", dll_candidates[0].display());
         }
         return Ok(());
     }
@@ -320,7 +320,7 @@ pub fn show_device_status(device_ref: &str) -> Result<(), String> {
         println!("  ▶ {eapo}");
     }
     // childApo 信息区
-    println!("  {}", tr!("子 APO：", "Child APO:"));
+    println!("  {}", tr("子 APO：", "Child APO:"));
     let child_pre = read_child_apo_guid(&ep.endpoint_guid, ChildApoKind::PreMix)
         .map(|g| slot_friendly(&format!("{g:?}")).unwrap_or_else(|| format!("{g:?}")))
         .unwrap_or_else(|| "-".to_string());
@@ -457,7 +457,7 @@ pub fn list_devices(json: bool) -> Result<(), String> {
         return Ok(());
     }
     if devices.is_empty() {
-        println!("{}", tr!("（无音频端点）", "(no audio endpoints)"));
+        println!("{}", tr("（无音频端点）", "(no audio endpoints)"));
         return Ok(());
     }
     for (i, d) in devices.iter().enumerate() {
