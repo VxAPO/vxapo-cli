@@ -12,6 +12,7 @@ use vxapo_driver::object::dll_exports::register_apo_with_path;
 use vxapo_driver::sys::com::prelude::guid_to_string;
 use vxapo_driver::object::vx_reg_props::{CLSID_VXAPO_POST_MIX, CLSID_VXAPO_PRE_MIX};
 
+use crate::i18n::{Lang, lang, tr};
 use crate::knowledge::KNOWN_APO_CLSIDS;
 
 /// JSON 字符串转义（，无依赖手写最小实现）。
@@ -67,14 +68,26 @@ fn auto_register_driver() -> Result<(), String> {
         String::new()
     };
     if dll_path.is_empty() {
-        println!("  ⚠ 未找到 {}（跳过自动注册——已由安装器/regsvr32 注册则无碍）", dll.display());
+        if lang() == Lang::En {
+            println!("  ⚠ {} not found (skipping auto-register - no problem if already registered by installer/regsvr32)", dll.display());
+        } else {
+            println!("  ⚠ 未找到 {}（跳过自动注册——已由安装器/regsvr32 注册则无碍）", dll.display());
+        }
         return Ok(());
     }
     let hr = register_apo_with_path(&dll_path);
     if hr.0 == 0 {
-        println!("  ✓ 已刷新全局 APO 注册：{dll_path}");
+        if lang() == Lang::En {
+            println!("  ✓ Global APO registration refreshed: {dll_path}");
+        } else {
+            println!("  ✓ 已刷新全局 APO 注册：{dll_path}");
+        }
     } else {
-        return Err(format!("driver 自动注册失败：{hr:?}"));
+        if lang() == Lang::En {
+            return Err(format!("Driver auto-registration failed: {hr:?}"));
+        } else {
+            return Err(format!("driver 自动注册失败：{hr:?}"));
+        }
     }
     // 回读验证 CLSID 绑定（PreMix 即可，两者同路径）。
     let clsid_str = guid_to_string(&CLSID_VXAPO_PRE_MIX);
@@ -84,10 +97,28 @@ fn auto_register_driver() -> Result<(), String> {
     );
     match check {
         Ok(k) => match k.read_sz_value("") {
-            Ok(p) => println!("  ✓ CLSID→DLL 绑定确认：{p}"),
-            Err(e) => return Err(format!("CLSID 绑定回读失败：{e}")),
+            Ok(p) => {
+                    if lang() == Lang::En {
+                        println!("  ✓ CLSID->DLL binding confirmed: {p}");
+                    } else {
+                        println!("  ✓ CLSID→DLL 绑定确认：{p}");
+                    }
+                }
+            Err(e) => {
+                    if lang() == Lang::En {
+                        return Err(format!("CLSID binding read-back failed: {e}"));
+                    } else {
+                        return Err(format!("CLSID 绑定回读失败：{e}"));
+                    }
+                }
         },
-        Err(e) => return Err(format!("CLSID 绑定验证失败：{e}")),
+        Err(e) => {
+                    if lang() == Lang::En {
+                        return Err(format!("CLSID binding verification failed: {e}"));
+                    } else {
+                        return Err(format!("CLSID 绑定验证失败：{e}"));
+                    }
+                }
     }
     Ok(())
 }
@@ -115,13 +146,29 @@ pub struct DeviceRef {
 /// 供用户决定是否保留为子 APO。
 pub fn preview_install(device_ref: &str) -> Result<String, String> {
     let dev = resolve_device(device_ref)?;
-    let devices = enumerate_devices().map_err(|e| format!("枚举设备失败：{e}"))?;
+    let devices = enumerate_devices().map_err(|e| {
+        if lang() == Lang::En {
+            format!("Failed to enumerate devices: {e}")
+        } else {
+            format!("枚举设备失败：{e}")
+        }
+    })?;
     let d = devices
         .iter()
         .find(|d| d.endpoint.as_ref().map(|e| e.endpoint_guid.eq_ignore_ascii_case(&dev.guid)).unwrap_or(false))
-        .ok_or_else(|| "设备不在枚举列表".to_string())?;
+        .ok_or_else(|| {
+            if lang() == Lang::En {
+                "Device not in enumeration list".to_string()
+            } else {
+                "设备不在枚举列表".to_string()
+            }
+        })?;
     let slot_names = ["LFX", "GFX", "SFX", "MFX", "EFX"];
-    let mut lines = vec![format!("  设备：{}", dev.name)];
+    let mut lines = vec![if lang() == Lang::En {
+        format!("  Device: {}", dev.name)
+    } else {
+        format!("  设备：{}", dev.name)
+    }];
     for (i, val) in d.slots.iter().enumerate() {
         let label = match val {
             vxapo_driver::install::device::slots::SlotValue::Guid(g) => {
@@ -137,12 +184,22 @@ pub fn preview_install(device_ref: &str) -> Result<String, String> {
 
 /// 解析 `<device>`：GUID（规范形式）或枚举序号 → (guid, name, connection)。
 pub fn resolve_device(device_ref: &str) -> Result<DeviceRef, String> {
-    let devices = enumerate_devices().map_err(|e| format!("枚举设备失败：{e}"))?;
+    let devices = enumerate_devices().map_err(|e| {
+        if lang() == Lang::En {
+            format!("Failed to enumerate devices: {e}")
+        } else {
+            format!("枚举设备失败：{e}")
+        }
+    })?;
     if device_ref.starts_with('{') {
         let guid = device_ref.to_owned();
         // GUID 格式校验（{xxxxxxxx-...}，len=38）
         if guid.len() != 38 || !guid.ends_with('}') {
-            return Err(format!("无效 GUID：<{device_ref}>（应为 {{XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX}}）"));
+            if lang() == Lang::En {
+                return Err(format!("Invalid GUID: <{device_ref}> (expected {{XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX}})"));
+            } else {
+                return Err(format!("无效 GUID：<{device_ref}>（应为 {{XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX}}）"));
+            }
         }
         let name = devices
             .iter()
@@ -155,11 +212,27 @@ pub fn resolve_device(device_ref: &str) -> Result<DeviceRef, String> {
     }
     // 数字序号
     if let Ok(idx) = device_ref.parse::<usize>() {
-        let d = devices.get(idx).ok_or_else(|| format!("枚举序号越界：<{device_ref}>（0..{}）", devices.len().saturating_sub(1)))?;
-        let ep = d.endpoint.as_ref().ok_or_else(|| "设备缺端点信息".to_string())?;
+        let d = devices.get(idx).ok_or_else(|| {
+            if lang() == Lang::En {
+                format!("Enumeration index out of range: <{device_ref}> (0..{})", devices.len().saturating_sub(1))
+            } else {
+                format!("枚举序号越界：<{device_ref}>（0..{}）", devices.len().saturating_sub(1))
+            }
+        })?;
+        let ep = d.endpoint.as_ref().ok_or_else(|| {
+            if lang() == Lang::En {
+                "Device missing endpoint info".to_string()
+            } else {
+                "设备缺端点信息".to_string()
+            }
+        })?;
         return Ok(DeviceRef { guid: ep.endpoint_guid.clone(), name: ep.friendly_name.clone(), connection: String::new() });
     }
-    Err(format!("未知设备：<{device_ref}>（可用 list 查看序号，或用 {{GUID}} 形式）"))
+    if lang() == Lang::En {
+        Err(format!("Unknown device: <{device_ref}> (use list to see indices, or use {{GUID}})"))
+    } else {
+        Err(format!("未知设备：<{device_ref}>（可用 list 查看序号，或用 {{GUID}} 形式）"))
+    }
 }
 
 /// 管理员检查（install/uninstall 需 HKLM 写权限）。
@@ -180,10 +253,18 @@ pub fn require_admin() -> Result<(), String> {
             if probe_ok {
                 Ok(())
             } else {
+                if lang() == Lang::En {
+                Err("Administrator privileges required (write to HKLM). Please run CLI as Administrator.".to_string())
+            } else {
                 Err("需要管理员权限（写入 HKLM）。请以管理员身份运行 CLI（右键→以管理员身份运行）。".to_string())
             }
+            }
         }
-        Err(_) => Err("需要管理员权限（写入 HKLM）。请以管理员身份运行 CLI（右键→以管理员身份运行）。".to_string()),
+        Err(_) => if lang() == Lang::En {
+                Err("Administrator privileges required (write to HKLM). Please run CLI as Administrator.".to_string())
+            } else {
+                Err("需要管理员权限（写入 HKLM）。请以管理员身份运行 CLI（右键→以管理员身份运行）。".to_string())
+            },
     }
 }
 
@@ -193,15 +274,31 @@ pub fn require_admin() -> Result<(), String> {
 /// （PreMixChild/PostMixChild，运行期委托给谁）。
 pub fn show_device_status(device_ref: &str) -> Result<(), String> {
     let dev = resolve_device(device_ref)?;
-    let devices = enumerate_devices().map_err(|e| format!("枚举设备失败：{e}"))?;
+    let devices = enumerate_devices().map_err(|e| {
+        if lang() == Lang::En {
+            format!("Failed to enumerate devices: {e}")
+        } else {
+            format!("枚举设备失败：{e}")
+        }
+    })?;
     let d = devices
         .iter()
         .find(|d| d.endpoint.as_ref().map(|e| e.endpoint_guid.eq_ignore_ascii_case(&dev.guid)).unwrap_or(false))
-        .ok_or_else(|| "设备不在枚举列表".to_string())?;
+        .ok_or_else(|| {
+            if lang() == Lang::En {
+                "Device not in enumeration list".to_string()
+            } else {
+                "设备不在枚举列表".to_string()
+            }
+        })?;
     let ep = d.endpoint.as_ref().unwrap();
     println!("[{}]", ep.friendly_name);
     println!("  GUID: {}", ep.endpoint_guid);
-    println!("  版本: {}  模式: {:?}", d.installed_version, d.install_mode);
+    if lang() == Lang::En {
+        println!("  Version: {}  Mode: {:?}", d.installed_version, d.install_mode);
+    } else {
+        println!("  版本: {}  模式: {:?}", d.installed_version, d.install_mode);
+    }
     // 5 槽位占用（友好名）
     let slot_names = ["LFX", "GFX", "SFX", "MFX", "EFX"];
     for (s, val) in d.slots.iter().enumerate() {
@@ -218,8 +315,8 @@ pub fn show_device_status(device_ref: &str) -> Result<(), String> {
     if let Some(eapo) = detect_eapo_status(&d.slots) {
         println!("  ▶ {eapo}");
     }
-    // childApo 信息区（子 APO：VxAPO 运行时委托给谁）
-    println!("  子 APO：");
+    // childApo 信息区
+    println!("  {}", tr!("子 APO：", "Child APO:"));
     let child_pre = read_child_apo_guid(&ep.endpoint_guid, ChildApoKind::PreMix)
         .map(|g| slot_friendly(&format!("{g:?}")).unwrap_or_else(|| format!("{g:?}")))
         .unwrap_or_else(|| "-".to_string());
@@ -228,10 +325,14 @@ pub fn show_device_status(device_ref: &str) -> Result<(), String> {
         .unwrap_or_else(|| "-".to_string());
     println!("    PreMixChild: {child_pre}");
     println!("    PostMixChild: {child_post}");
-    // 槽位失守检测（仅存 lib/childapo 键时验证）
+    // 槽位失守检测
     if child_apo_key_exists(&ep.endpoint_guid) {
         if let Some(lost) = detect_lost_slot(&d.slots, d.install_mode) {
-            println!("  ⚠ 槽位失守：{lost} 已被接管，需重装（install）");
+            if lang() == Lang::En {
+                println!("  ⚠ Slot lost: {lost} has been taken over; reinstall required");
+            } else {
+                println!("  ⚠ 槽位失守：{lost} 已被接管，需重装（install）");
+            }
         }
     }
     Ok(())
@@ -274,7 +375,13 @@ fn endpoint_volume(guid: &str) -> Option<f32> {
 
 /// 打印设备列表 + 槽位占用（包含 4.5 友好名 + 槽位失守标注，CLI 引用规范 5.2 status/list）。
 pub fn list_devices(json: bool) -> Result<(), String> {
-    let devices = enumerate_devices().map_err(|e| format!("枚举设备失败：{e}"))?;
+    let devices = enumerate_devices().map_err(|e| {
+        if lang() == Lang::En {
+            format!("Failed to enumerate devices: {e}")
+        } else {
+            format!("枚举设备失败：{e}")
+        }
+    })?;
     if json {
         let mut parts = Vec::new();
         let formats: std::collections::HashMap<String, (Option<u32>, Option<u16>, Option<u16>, &'static str)> =
@@ -346,16 +453,22 @@ pub fn list_devices(json: bool) -> Result<(), String> {
         return Ok(());
     }
     if devices.is_empty() {
-        println!("（无音频端点）");
+        println!("{}", tr!("（无音频端点）", "(no audio endpoints)"));
         return Ok(());
     }
     for (i, d) in devices.iter().enumerate() {
         let ep = d.endpoint.as_ref();
-        let name = ep.map(|e| e.friendly_name.clone()).unwrap_or_else(|| "(未命名)".to_string());
+        let name = ep.map(|e| e.friendly_name.clone()).unwrap_or_else(|| {
+            if lang() == Lang::En { "(unnamed)".to_string() } else { "(未命名)".to_string() }
+        });
         let guid = ep.map(|e| e.endpoint_guid.clone()).unwrap_or_default();
         println!("[{i}] {name}");
         println!("     GUID: {guid}");
-        println!("     版本: {}  模式: {:?}", d.installed_version, d.install_mode);
+        if lang() == Lang::En {
+            println!("     Version: {}  Mode: {:?}", d.installed_version, d.install_mode);
+        } else {
+            println!("     版本: {}  模式: {:?}", d.installed_version, d.install_mode);
+        }
         // 5 槽位占用（友好名）
         let slot_names = ["LFX", "GFX", "SFX", "MFX", "EFX"];
         for (s, val) in d.slots.iter().enumerate() {
@@ -366,19 +479,21 @@ pub fn list_devices(json: bool) -> Result<(), String> {
                 }
                 _ => "-".to_string(),
             };
-            // slot_names 索引 + 槽位名（format 不能嵌套 {}）
             let sname = slot_names[s];
             println!("     {}[{}]: {label}", sname, s);
         }
-        // EAPO 安装行为（要求：除 VxAPO CLSID 外还要能确定 EAPO 安装状态给 CLI 看）
+        // EAPO 安装状态
         if let Some(eapo) = detect_eapo_status(&d.slots) {
             println!("     ▶ {eapo}");
         }
-        // 槽位失守检测（判定语义：**只有 childapo 键存在（非全量=已安装过）才验证**；
-        // 初次安装/完全卸载后（键不存在=全量路径）不走失守逻辑）
+        // 槽位失守检测
         if !guid.is_empty() && child_apo_key_exists(&guid) {
             if let Some(lost) = detect_lost_slot(&d.slots, d.install_mode) {
-                println!("     ⚠ 槽位失守：{lost} 已被接管，需重装（install）");
+                if lang() == Lang::En {
+                    println!("     ⚠ Slot lost: {lost} has been taken over; reinstall required");
+                } else {
+                    println!("     ⚠ 槽位失守：{lost} 已被接管，需重装（install）");
+                }
             }
         }
     }
@@ -429,9 +544,21 @@ fn detect_eapo_status(
         }
     }
     match (pre_slot, post_slot) {
-        (Some(p), Some(q)) => Some(format!("EAPO 已安装：PreMix=({p}) + PostMix=({q})")),
-        (Some(p), None) => Some(format!("EAPO 部分安装：仅 PreMix=({p})")),
-        (None, Some(q)) => Some(format!("EAPO 部分安装：仅 PostMix=({q})")),
+        (Some(p), Some(q)) => Some(if lang() == Lang::En {
+            format!("EAPO installed: PreMix=({p}) + PostMix=({q})")
+        } else {
+            format!("EAPO 已安装：PreMix=({p}) + PostMix=({q})")
+        }),
+        (Some(p), None) => Some(if lang() == Lang::En {
+            format!("EAPO partially installed: PreMix only ({p})")
+        } else {
+            format!("EAPO 部分安装：仅 PreMix=({p})")
+        }),
+        (None, Some(q)) => Some(if lang() == Lang::En {
+            format!("EAPO partially installed: PostMix only ({q})")
+        } else {
+            format!("EAPO 部分安装：仅 PostMix=({q})")
+        }),
         (None, None) => None,
     }
 }
@@ -463,7 +590,13 @@ pub fn install(device_ref: &str, mode: Option<&str>, no_child: bool, json: bool)
                 "lfxgfx" => vxapo_driver::install::device::slots::InstallMode::LfxGfx,
                 "sfxmfx" => vxapo_driver::install::device::slots::InstallMode::SfxMfx,
                 "sfxefx" => vxapo_driver::install::device::slots::InstallMode::SfxEfx,
-                _ => return Err(format!("无效模式：{m}（LfxGfx/SfxMfx/SfxEfx）")),
+                _ => {
+                        if lang() == Lang::En {
+                            return Err(format!("Invalid mode: {m} (LfxGfx/SfxMfx/SfxEfx)"));
+                        } else {
+                            return Err(format!("无效模式：{m}（LfxGfx/SfxMfx/SfxEfx）"));
+                        }
+                    }
             };
         }
         // 缺省：自动探测（EAPO 三档，driver detect_mode_for_guid）。
@@ -471,7 +604,11 @@ pub fn install(device_ref: &str, mode: Option<&str>, no_child: bool, json: bool)
             config.install_mode =
                 vxapo_driver::install::device::info::detect_mode_for_guid(&dev.guid);
             if !json {
-                println!("▶ 自动探测安装模式：{:?}", config.install_mode);
+                if lang() == Lang::En {
+                    println!("▶ Auto-detected install mode: {:?}", config.install_mode);
+                } else {
+                    println!("▶ 自动探测安装模式：{:?}", config.install_mode);
+                }
             }
         }
     }
@@ -481,7 +618,11 @@ pub fn install(device_ref: &str, mode: Option<&str>, no_child: bool, json: bool)
     // 快照基线（安装前建立/替换，Phase C——只注册表，config 不属 CLI 快照）。
     if let Err(e) = snapshot_device(&dev.guid, true) {
         if !json {
-            println!("⚠ 快照建立失败（继续安装）：{e}");
+            if lang() == Lang::En {
+                    println!("⚠ Snapshot creation failed (continuing): {e}");
+                } else {
+                    println!("⚠ 快照建立失败（继续安装）：{e}");
+                }
         }
     }
 
@@ -493,7 +634,13 @@ pub fn install(device_ref: &str, mode: Option<&str>, no_child: bool, json: bool)
     // DisableProtectedAudioDG、槽位/ProcessingModes 写入和安装后重启
     // 均由 driver install_endpoint 全流程处理（CLI 不再重复）。
     install_endpoint(&dev.guid, &dev.name, &dev.connection, &config, true)
-        .map_err(|e| format!("install_endpoint 失败：{e}（可用 vxapo-cli snapshot diff -d {guid} 查看变更）", guid = dev.guid))?;
+        .map_err(|e| {
+            if lang() == Lang::En {
+                format!("install_endpoint failed: {e} (use vxapo-cli snapshot diff -d {} to view changes)", dev.guid)
+            } else {
+                format!("install_endpoint 失败：{e}（可用 vxapo-cli snapshot diff -d {} 查看变更）", dev.guid)
+            }
+        })?;
     if json {
         println!(
             "{{\"ok\":true,\"device\":\"{}\",\"mode\":\"{:?}\",\"message\":\"已安装\"}}",
@@ -501,7 +648,11 @@ pub fn install(device_ref: &str, mode: Option<&str>, no_child: bool, json: bool)
             config.install_mode
         );
     } else {
-        println!("✓ 已安装 {}（模式 {:?}，子 APO 保留={}）", dev.guid, config.install_mode, !no_child);
+        if lang() == Lang::En {
+                    println!("✓ Installed {} (mode {:?}, child APO keep={})", dev.guid, config.install_mode, !no_child);
+                } else {
+                    println!("✓ 已安装 {}（模式 {:?}，子 APO 保留={}）", dev.guid, config.install_mode, !no_child);
+                }
     }
 
     // per-device config.toml 检查（方案 A）：缺失时**自动从 exe 同级 .\config.toml 导入**，
@@ -527,30 +678,43 @@ pub fn install(device_ref: &str, mode: Option<&str>, no_child: bool, json: bool)
                         match std::fs::write(&path, &src) {
                             Ok(()) => {
                                 if !json {
-                                    println!(
-                                        "📄 已自动导入 {} → {}",
-                                        default_src.display(),
-                                        path
-                                    );
+                                    if lang() == Lang::En {
+                                        println!("📄 Auto-imported {} -> {}", default_src.display(), path);
+                                    } else {
+                                        println!("📄 已自动导入 {} → {}", default_src.display(), path);
+                                    }
                                 }
                             }
                             Err(e) => {
                                 if !json {
-                                    println!("⚠ 自动导入失败：{e}");
+                                    if lang() == Lang::En {
+                                        println!("⚠ Auto-import failed: {e}");
+                                    } else {
+                                        println!("⚠ 自动导入失败：{e}");
+                                    }
                                 }
                             }
                         }
                     }
                     Err(e) => {
                         if !json {
-                            println!("⚠ 读取 {} 失败：{e}", default_src.display());
+                            if lang() == Lang::En {
+                                        println!("⚠ Failed to read {}: {e}", default_src.display());
+                                    } else {
+                                        println!("⚠ 读取 {} 失败：{e}", default_src.display());
+                                    }
                         }
                     }
                 }
             } else {
                 if !json {
-                    println!("⚠ 未检测到 config.toml（{path}），APO 将按无配置运行。");
-                    println!("   请用 config set 写入：vxapo-cli config set -d <device> -f <你的配置文件>");
+                    if lang() == Lang::En {
+                        println!("⚠ No config.toml detected ({path}); APO will run without configuration.");
+                        println!("   Use: vxapo-cli config set -d <device> -f <your config file>");
+                    } else {
+                        println!("⚠ 未检测到 config.toml（{path}），APO 将按无配置运行。");
+                        println!("   请用 config set 写入：vxapo-cli config set -d <device> -f <你的配置文件>");
+                    }
                 }
             }
         }
@@ -565,13 +729,21 @@ pub fn uninstall(device_ref: &str, json: bool) -> Result<(), String> {
     require_admin()?;
     let dev = resolve_device(device_ref)?;
     if !snapshot_exists(&dev.guid) {
-        return Err("无基线可对比——快照不存在（先 install 建立基线）".to_string());
+        if lang() == Lang::En {
+            return Err("No baseline to compare - snapshot does not exist (run install first to create one)".to_string());
+        } else {
+            return Err("无基线可对比——快照不存在（先 install 建立基线）".to_string());
+        }
     }
     // 卸载前确保 audiodg 进程退出：audiodg 持有点端会**锁 MMDevices 槽位键句柄**，
     // 先经 driver SCM 停服务（30s 超时，不会挂死）+ taskkill 兜底杀残留 audiodg，
     // 保证槽位值可删（改用 SCM 替代 net stop——后者在服务未跑时可能挂起）。
     if !json {
-        println!("  停止音频服务 + 终止 audiodg（卸载前置）…");
+        if lang() == Lang::En {
+            println!("  Stopping audio service + terminating audiodg (uninstall prerequisite)...");
+        } else {
+            println!("  停止音频服务 + 终止 audiodg（卸载前置）…");
+        }
     }
     let _ = vxapo_driver::install::audiodg::stop_audio_service();
     let _ = std::process::Command::new("taskkill")
@@ -583,12 +755,22 @@ pub fn uninstall(device_ref: &str, json: bool) -> Result<(), String> {
     if let Err(e) = uninstall_endpoint(&dev.guid) {
         // 卸载失败也要尝试恢复音频服务。
         let _ = std::process::Command::new("net").args(["start", "audiosrv"]).output();
-        return Err(format!("uninstall_endpoint 失败：{e}"));
+        if lang() == Lang::En {
+            return Err(format!("uninstall_endpoint failed: {e}"));
+        } else {
+            return Err(format!("uninstall_endpoint 失败：{e}"));
+        }
     }
 
     // 卸载后回读验证：5 槽位中不应残留 VxAPO CLSID。
     let residual = enumerate_devices()
-        .map_err(|e| format!("回读枚举失败：{e}"))?
+        .map_err(|e| {
+        if lang() == Lang::En {
+            format!("Failed to re-enumerate devices: {e}")
+        } else {
+            format!("回读枚举失败：{e}")
+        }
+    })?
         .iter()
         .find(|d| d.endpoint.as_ref().map(|e| e.endpoint_guid.eq_ignore_ascii_case(&dev.guid)).unwrap_or(false))
         .map(|d| {
@@ -600,15 +782,27 @@ pub fn uninstall(device_ref: &str, json: bool) -> Result<(), String> {
         .unwrap_or(0);
     if residual > 0 {
         let _ = std::process::Command::new("net").args(["start", "audiosrv"]).output();
-        return Err(format!("卸载后检测到 {residual} 个槽位残留 VxAPO CLSID——音频进程可能仍占用，请重试。"));
+        if lang() == Lang::En {
+            return Err(format!("Detected {residual} slot(s) still containing VxAPO CLSID after uninstall - audio process may still be holding them. Please retry."));
+        } else {
+            return Err(format!("卸载后检测到 {residual} 个槽位残留 VxAPO CLSID——音频进程可能仍占用，请重试。"));
+        }
     }
 
     if json {
-        println!("{{\"ok\":true,\"device\":\"{}\",\"message\":\"已卸载\"}}", json_escape(&dev.guid));
+        if lang() == Lang::En {
+            println!("{{\"ok\":true,\"device\":\"{}\",\"message\":\"uninstalled\"}}", json_escape(&dev.guid));
+        } else {
+            println!("{{\"ok\":true,\"device\":\"{}\",\"message\":\"已卸载\"}}", json_escape(&dev.guid));
+        }
     } else {
         print!("✓ 已卸载 {}。", dev.guid);
         if let Ok(diff) = snapshot_diff(&dev.guid) {
-            println!(" 变更统计：{diff}");
+            if lang() == Lang::En {
+                println!("  Change summary: {diff}");
+            } else {
+                println!(" 变更统计：{diff}");
+            }
         } else {
             println!();
         }
@@ -621,13 +815,35 @@ pub fn uninstall(device_ref: &str, json: bool) -> Result<(), String> {
 pub fn config_set(device_ref: &str, file: &str) -> Result<(), String> {
     let dev = resolve_device(device_ref)?;
     let src = std::fs::read_to_string(file)
-        .map_err(|e| format!("读取源文件失败：{file}：{e}"))?;
+        .map_err(|e| {
+        if lang() == Lang::En {
+            format!("Failed to read source file {file}: {e}")
+        } else {
+            format!("读取源文件失败：{file}：{e}")
+        }
+    })?;
     let path = config_path(&dev.guid)?;
     if let Some(parent) = Path::new(&path).parent() {
-        std::fs::create_dir_all(parent).map_err(|e| format!("创建配置目录失败：{e}"))?;
+        std::fs::create_dir_all(parent).map_err(|e| {
+        if lang() == Lang::En {
+            format!("Failed to create config directory: {e}")
+        } else {
+            format!("创建配置目录失败：{e}")
+        }
+    })?;
     }
-    std::fs::write(&path, &src).map_err(|e| format!("写入 config 失败：{e}"))?;
-    println!("✓ config 已写入（{} 字节），语法验证中…", src.len());
+    std::fs::write(&path, &src).map_err(|e| {
+        if lang() == Lang::En {
+            format!("Failed to write config: {e}")
+        } else {
+            format!("写入 config 失败：{e}")
+        }
+    })?;
+    if lang() == Lang::En {
+        println!("✓ Config written ({} bytes), validating syntax...", src.len());
+    } else {
+        println!("✓ config 已写入（{} 字节），语法验证中…", src.len());
+    }
     config_show(&dev.guid)?;
     Ok(())
 }
@@ -638,12 +854,22 @@ pub fn config_show(device_ref: &str) -> Result<(), String> {
     let path = config_path(&dev.guid)?;
     let content = match std::fs::read_to_string(&path) {
         Ok(c) => c,
-        Err(_) => return Err("未配置：config.toml 不存在（可用 config set -f <file> 写入）".to_string()),
+        Err(_) => {
+            if lang() == Lang::En {
+                return Err("Not configured: config.toml does not exist (use config set -f <file> to write it)".to_string());
+            } else {
+                return Err("未配置：config.toml 不存在（可用 config set -f <file> 写入）".to_string());
+            }
+        }
     };
     println!("--- config.toml ({path}) ---");
     println!("{content}");
     // 读回一致性验证（CLI 引用规范 三「config show 读回验证——文件级」，不解析 DSP 语义）。
-    println!("✓ 文件可读回（{} 字节）", content.len());
+    if lang() == Lang::En {
+        println!("✓ File read back successfully ({} bytes)", content.len());
+    } else {
+        println!("✓ 文件可读回（{} 字节）", content.len());
+    }
     Ok(())
 }
 
@@ -662,7 +888,13 @@ fn config_path(guid: &str) -> Result<String, String> {
 /// 支持 GraphicEQ / Preamp / Wide / AuralEnhancer / Reverb / Maximizer /
 /// LoudnessCorrection；不支持的命令跳过并提示手动迁移。
 pub fn config_convert(src: &str, out: Option<&str>) -> Result<(), String> {
-    let text = std::fs::read_to_string(src).map_err(|e| format!("读取失败：{src}：{e}"))?;
+    let text = std::fs::read_to_string(src).map_err(|e| {
+        if lang() == Lang::En {
+            format!("Failed to read {src}: {e}")
+        } else {
+            format!("读取失败：{src}：{e}")
+        }
+    })?;
     let toml = convert_txt_to_toml(&text)?;
     let out_path = out.map(|s| s.to_string()).unwrap_or_else(|| {
         Path::new(src)
@@ -670,8 +902,18 @@ pub fn config_convert(src: &str, out: Option<&str>) -> Result<(), String> {
             .display()
             .to_string()
     });
-    std::fs::write(&out_path, &toml).map_err(|e| format!("写入失败：{out_path}：{e}"))?;
-    println!("✓ 已转换 {} → {}", src, out_path);
+    std::fs::write(&out_path, &toml).map_err(|e| {
+        if lang() == Lang::En {
+            format!("Failed to write {out_path}: {e}")
+        } else {
+            format!("写入失败：{out_path}：{e}")
+        }
+    })?;
+    if lang() == Lang::En {
+        println!("✓ Converted {} -> {}", src, out_path);
+    } else {
+        println!("✓ 已转换 {} → {}", src, out_path);
+    }
     println!("--- 输出预览 ---");
     println!("{toml}");
     Ok(())
@@ -685,7 +927,11 @@ fn convert_txt_to_toml(text: &str) -> Result<String, String> {
             continue;
         }
         let Some((cmd, rest)) = line.split_once(':') else {
+            if lang() == Lang::En {
+            println!("⚠ Skipping unrecognized line: {line}");
+        } else {
             println!("⚠ 跳过无法识别的行：{line}");
+        }
             continue;
         };
         let cmd = cmd.trim();
@@ -693,7 +939,11 @@ fn convert_txt_to_toml(text: &str) -> Result<String, String> {
         match cmd.to_ascii_lowercase().as_str() {
             "graphiceq" => {
                 if rest.is_empty() {
+                    if lang() == Lang::En {
+                    println!("⚠ GraphicEQ: empty parameters skipped");
+                } else {
                     println!("⚠ GraphicEQ: 空参数跳过");
+                }
                     continue;
                 }
                 let mut bands = Vec::new();
@@ -705,7 +955,13 @@ fn convert_txt_to_toml(text: &str) -> Result<String, String> {
                     let mut it = seg.split_whitespace();
                     let (f, g) = match (it.next(), it.next()) {
                         (Some(f), Some(g)) => (f, g),
-                        _ => return Err(format!("GraphicEQ 段无效：'{seg}'")),
+                        _ => {
+                        if lang() == Lang::En {
+                            return Err(format!("Invalid GraphicEQ segment: '{seg}'"));
+                        } else {
+                            return Err(format!("GraphicEQ 段无效：'{seg}'"));
+                        }
+                    }
                     };
                     let f: f32 = f
                         .replace(',', ".")
@@ -815,7 +1071,13 @@ fn convert_txt_to_toml(text: &str) -> Result<String, String> {
                     "[[effects]]\ntype = \"loudness\"\nphon = {phon}\nreference_phon = {reference}\n\n"
                 ));
             }
-            other => println!("⚠ 命令 {other}: 不再支持，跳过（请手动迁移）"),
+            other => {
+                    if lang() == Lang::En {
+                        println!("⚠ Command {other}: no longer supported, skipped (please migrate manually)");
+                    } else {
+                        println!("⚠ 命令 {other}: 不再支持，跳过（请手动迁移）");
+                    }
+                }
         }
     }
     Ok(out)
@@ -877,10 +1139,26 @@ pub fn snapshot_device(guid: &str, replace: bool) -> Result<(), String> {
     }
     let snapshot = capture_snapshot(guid)?;
     if let Some(parent) = Path::new(&path).parent() {
-        std::fs::create_dir_all(parent).map_err(|e| format!("创建快照目录失败：{e}"))?;
+        std::fs::create_dir_all(parent).map_err(|e| {
+        if lang() == Lang::En {
+            format!("Failed to create snapshot directory: {e}")
+        } else {
+            format!("创建快照目录失败：{e}")
+        }
+    })?;
     }
-    std::fs::write(&path, &snapshot).map_err(|e| format!("写快照失败：{e}"))?;
-    println!("✓ 快照已保存：{path}");
+    std::fs::write(&path, &snapshot).map_err(|e| {
+        if lang() == Lang::En {
+            format!("Failed to write snapshot: {e}")
+        } else {
+            format!("写快照失败：{e}")
+        }
+    })?;
+    if lang() == Lang::En {
+        println!("✓ Snapshot saved: {path}");
+    } else {
+        println!("✓ 快照已保存：{path}");
+    }
     Ok(())
 }
 
@@ -888,7 +1166,13 @@ pub fn snapshot_device(guid: &str, replace: bool) -> Result<(), String> {
 fn capture_snapshot(guid: &str) -> Result<String, String> {
     // FxProperties 5 槽位 + childApoPath 安装信息区 + DisableEnhancements。
     // 经 driver：enumerate_devices 拿槽位 + read_child_apo_guid / child_apo_key_exists 判定。
-    let devices = enumerate_devices().map_err(|e| format!("枚举失败：{e}"))?;
+    let devices = enumerate_devices().map_err(|e| {
+        if lang() == Lang::En {
+            format!("Enumeration failed: {e}")
+        } else {
+            format!("枚举失败：{e}")
+        }
+    })?;
     let d = devices
         .iter()
         .find(|d| d.endpoint.as_ref().map(|e| e.endpoint_guid.eq_ignore_ascii_case(guid)).unwrap_or(false))
@@ -914,7 +1198,13 @@ fn capture_snapshot(guid: &str) -> Result<String, String> {
 pub fn snapshot_diff(guid: &str) -> Result<String, String> {
     let path = snapshot_path(guid);
     let baseline = std::fs::read_to_string(&path)
-        .map_err(|_| "无基线：先 install 建立快照".to_string())?;
+        .map_err(|_| {
+            if lang() == Lang::En {
+                "No baseline: run install first to create a snapshot".to_string()
+            } else {
+                "无基线：先 install 建立快照".to_string()
+            }
+        })?;
     let current = capture_snapshot(guid)?;
     let b_lines: Vec<(String, String)> = baseline
         .lines()
@@ -948,21 +1238,43 @@ pub fn snapshot_diff(guid: &str) -> Result<String, String> {
     for (k, _) in &b_lines {
         if !c_lines.iter().any(|(ck, _)| ck == k) {
             dels += 1;
-            println!("- {} = （已删除）", k);
+            if lang() == Lang::En {
+                println!("- {} = (deleted)", k);
+            } else {
+                println!("- {} = （已删除）", k);
+            }
         }
     }
-    Ok(format!("变更：+{adds} 新增 / -{dels} 删除 / ~{mods} 修改 / {same} 无变化"))
+    if lang() == Lang::En {
+        Ok(format!("Changes: +{adds} added / -{dels} deleted / ~{mods} modified / {same} unchanged"))
+    } else {
+        Ok(format!("变更：+{adds} 新增 / -{dels} 删除 / ~{mods} 修改 / {same} 无变化"))
+    }
 }
 
 /// snapshot restore：从基线恢复注册表状态（仅经 driver 操作；当前只列示差异提示，写恢复走 uninstall/install）。
 pub fn snapshot_restore(guid: &str) -> Result<(), String> {
     require_admin()?;
     if !snapshot_exists(guid) {
-        return Err("无基线可恢复".to_string());
+        if lang() == Lang::En {
+            return Err("No baseline to restore".to_string());
+        } else {
+            return Err("无基线可恢复".to_string());
+        }
     }
     // 恢复 = 卸载 + 按基线重建（driver Transaction 保证注册表级一致）。
     // 简化：先 uninstall 清槽位，再提示基线重建方式（完整恢复走 install 全量路径）。
-    uninstall_endpoint(&guid).map_err(|e| format!("恢复失败（uninstall）：{e}"))?;
-    println!("✓ 已恢复基线（槽位清空 + childApoPath 删除）。如需回到基线安装态，请 install。");
+    uninstall_endpoint(&guid).map_err(|e| {
+        if lang() == Lang::En {
+            format!("Restore failed (uninstall): {e}")
+        } else {
+            format!("恢复失败（uninstall）：{e}")
+        }
+    })?;
+    if lang() == Lang::En {
+        println!("✓ Baseline restored (slots cleared + childApoPath removed). Run install to return to installed state.");
+    } else {
+        println!("✓ 已恢复基线（槽位清空 + childApoPath 删除）。如需回到基线安装态，请 install。");
+    }
     Ok(())
 }
