@@ -20,7 +20,7 @@ mod regdump;
 
 use std::io::Write;
 
-use i18n::{Lang, lang, set_lang, tr};
+use i18n::{Lang, lang, set_lang};
 
 macro_rules! tr {
     ($zh:expr, $en:expr) => { i18n::tr($zh, $en) };

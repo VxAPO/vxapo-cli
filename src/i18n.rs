@@ -16,7 +16,7 @@ pub fn lang() -> Lang {
     *LANG.get().unwrap_or(&Lang::Zh)
 }
 
-pub fn tr(zh: &str, en: &str) -> &'static str {
+pub fn tr<'a>(zh: &'a str, en: &'a str) -> &'a str {
     if lang() == Lang::En {
         en
     } else {
