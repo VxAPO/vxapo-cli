@@ -1,17 +1,10 @@
 /target/
 *.pdb
 *.exe
-
-# 调试临时输出
 *_out.txt
-
-# 调试临时文件
 audiodg_mods.txt
 verify_install.txt
-
-# 调试临时文件(通配)
 *_check.txt
 *.txt
 
 # Docs archived to ../vxapo-docs
-/README.md
