@@ -605,6 +605,19 @@ fn slot_friendly(clsid: &str) -> Option<String> {
     None
 }
 
+/// 强制重启音频服务，确保 audiodg 重新加载最新注册信息。
+fn restart_audio_service_force() {
+    let _ = std::process::Command::new("taskkill")
+        .args(["/f", "/im", "audiodg.exe"])
+        .output();
+    let _ = std::process::Command::new("net")
+        .args(["stop", "audiosrv"])
+        .output();
+    let _ = std::process::Command::new("net")
+        .args(["start", "audiosrv"])
+        .output();
+}
+
 /// install 命令（CLI 引用规范 5.1）。
 pub fn install(device_ref: &str, mode: Option<&str>, no_child: bool, json: bool) -> Result<(), String> {
     require_admin()?;
@@ -681,6 +694,16 @@ pub fn install(device_ref: &str, mode: Option<&str>, no_child: bool, json: bool)
                     println!("✓ 已安装 {}（模式 {:?}，子 APO 保留={}）", dev.guid, config.install_mode, !no_child);
                 }
     }
+
+    // 强制重启音频服务，确保 audiodg 重新加载新注册的 APO。
+    if !json {
+        if lang() == Lang::En {
+            println!("  Restarting audio service to apply changes...");
+        } else {
+            println!("  正在重启音频服务以应用变更…");
+        }
+    }
+    restart_audio_service_force();
 
     // per-device config.toml 检查（方案 A）：缺失时**自动从 exe 同级 .\config.toml 导入**，
     // 避免「装完发现没配置」。约定：把 config.txt 放在 vxapo-cli.exe 同目录即可，
@@ -815,6 +838,14 @@ pub fn uninstall(device_ref: &str, json: bool) -> Result<(), String> {
             return Err(format!("卸载后检测到 {residual} 个槽位残留 VxAPO CLSID——音频进程可能仍占用，请重试。"));
         }
     }
+
+    // 卸载成功后重启音频服务，恢复系统音频。
+    if lang() == Lang::En {
+        println!("  Restarting audio service to apply uninstall...");
+    } else {
+        println!("  正在重启音频服务以应用卸载…");
+    }
+    restart_audio_service_force();
 
     if json {
         if lang() == Lang::En {
