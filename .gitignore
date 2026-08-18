@@ -12,3 +12,6 @@ verify_install.txt
 # 调试临时文件(通配)
 *_check.txt
 *.txt
+
+# Docs archived to ../vxapo-docs
+/README.md
