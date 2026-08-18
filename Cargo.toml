@@ -2,6 +2,8 @@
 name = "vxapo-cli"
 version = "0.3.2"
 edition = "2021"
+description = "VxAPO command-line tool for device management and diagnostics"
+license = "GPL-3.0-or-later"
 
 [dependencies]
 winreg = "0.52"

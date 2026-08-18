@@ -32,7 +32,7 @@ fn main() {
 
 /// 子命令分派（返回进程退出码：0 成功 / 1 失败）。
 fn run_subcommand(args: &[String]) -> i32 {
-    // v0.3.0：--json 机器可读输出（WinUI 3 集成用）。从参数中剥离，不影响原有解析。
+    // --json 机器可读输出（WinUI 3 集成用）。从参数中剥离，不影响原有解析。
     let json = args.iter().any(|a| a == "--json");
     let args: Vec<String> = args.iter().filter(|a| *a != "--json").cloned().collect();
     let cmd = args[0].as_str();
@@ -258,7 +258,7 @@ fn driver_device_menu(dev_idx: &usize) -> bool {
                 }
             }
             "s" => {
-                // 单设备状态：槽位 + childApo 信息区（用户要求——只显示当前设备）。
+                // 单设备状态：槽位 + childApo 信息区（要求——只显示当前设备）。
                 match commands::show_device_status(&dev_idx.to_string()) {
                     Ok(()) => {}
                     Err(e) => println!("✗ {e}"),

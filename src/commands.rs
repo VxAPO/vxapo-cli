@@ -14,7 +14,7 @@ use vxapo_driver::object::vx_reg_props::{CLSID_VXAPO_POST_MIX, CLSID_VXAPO_PRE_M
 
 use crate::knowledge::KNOWN_APO_CLSIDS;
 
-/// JSON 字符串转义（v0.3.0，无依赖手写最小实现）。
+/// JSON 字符串转义（，无依赖手写最小实现）。
 pub(crate) fn json_escape(s: &str) -> String {
     let mut out = String::with_capacity(s.len() + 8);
     for c in s.chars() {
@@ -237,7 +237,7 @@ pub fn show_device_status(device_ref: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// 查询端点主音量（0.0–1.0，v0.3.2 新增；失败返回 None）。
+/// 查询端点主音量（0.0–1.0， 新增；失败返回 None）。
 fn endpoint_volume(guid: &str) -> Option<f32> {
     use windows::Win32::Media::Audio::{
         EDataFlow, IMMDeviceEnumerator, MMDeviceEnumerator, DEVICE_STATE_ACTIVE,
@@ -370,11 +370,11 @@ pub fn list_devices(json: bool) -> Result<(), String> {
             let sname = slot_names[s];
             println!("     {}[{}]: {label}", sname, s);
         }
-        // EAPO 安装行为（用户要求：除 VxAPO CLSID 外还要能确定 EAPO 安装状态给 CLI 看）
+        // EAPO 安装行为（要求：除 VxAPO CLSID 外还要能确定 EAPO 安装状态给 CLI 看）
         if let Some(eapo) = detect_eapo_status(&d.slots) {
             println!("     ▶ {eapo}");
         }
-        // 槽位失守检测（v8.5 判定语义：**只有 childapo 键存在（非全量=已安装过）才验证**；
+        // 槽位失守检测（判定语义：**只有 childapo 键存在（非全量=已安装过）才验证**；
         // 初次安装/完全卸载后（键不存在=全量路径）不走失守逻辑）
         if !guid.is_empty() && child_apo_key_exists(&guid) {
             if let Some(lost) = detect_lost_slot(&d.slots, d.install_mode) {
@@ -385,7 +385,7 @@ pub fn list_devices(json: bool) -> Result<(), String> {
     Ok(())
 }
 
-/// 检测安装模式槽位是否失守（CLI 引用规范 5.2 + v8.5）。
+/// 检测安装模式槽位是否失守（CLI 引用规范 5.2 +）。
 fn detect_lost_slot(
     slots: &[vxapo_driver::install::device::slots::SlotValue; 5],
     mode: vxapo_driver::install::device::slots::InstallMode,
@@ -569,7 +569,7 @@ pub fn uninstall(device_ref: &str, json: bool) -> Result<(), String> {
     }
     // 卸载前确保 audiodg 进程退出：audiodg 持有点端会**锁 MMDevices 槽位键句柄**，
     // 先经 driver SCM 停服务（30s 超时，不会挂死）+ taskkill 兜底杀残留 audiodg，
-    // 保证槽位值可删（2026-08-05：改用 SCM 替代 net stop——后者在服务未跑时可能挂起）。
+    // 保证槽位值可删（改用 SCM 替代 net stop——后者在服务未跑时可能挂起）。
     if !json {
         println!("  停止音频服务 + 终止 audiodg（卸载前置）…");
     }
@@ -647,7 +647,7 @@ pub fn config_show(device_ref: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// per-device config 路径（方案 A，2026-08-04：C:\ProgramData\VxAPO\{GUID}\config.toml）。
+/// per-device config 路径（方案 A，：C:\ProgramData\VxAPO\{GUID}\config.toml）。
 ///
 /// **为什么不用 Documents**：APO 真实运行在 audiodg（SYSTEM 服务），调 `documents_folder()`
 /// 拿到 SYSTEM 的 Documents，读不到 CLI（用户进程）写进用户 Documents 的文件——
@@ -657,7 +657,7 @@ fn config_path(guid: &str) -> Result<String, String> {
     Ok(format!(r"C:\ProgramData\VxAPO\{guid}\config.toml"))
 }
 
-/// config convert：旧 EAPO 风格 txt → config.toml（迁移期工具，v9.11）。
+/// config convert：旧 EAPO 风格 txt → config.toml（迁移期工具）。
 ///
 /// 支持 GraphicEQ / Preamp / Wide / AuralEnhancer / Reverb / Maximizer /
 /// LoudnessCorrection；不支持的命令跳过并提示手动迁移。
