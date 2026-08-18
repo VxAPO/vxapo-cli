@@ -124,6 +124,29 @@ fn auto_register_driver() -> Result<(), String> {
                     }
                 }
     }
+
+    // 回读验证 AudioEngine APO 注册键：缺失会导致引擎静默拒载。
+    let ae_path = format!(r"AudioEngine\AudioProcessingObjects\{}", clsid_str);
+    match vxapo_driver::sys::registry::RegKey::open(
+        windows::Win32::System::Registry::HKEY_CLASSES_ROOT,
+        &ae_path,
+    ) {
+        Ok(_) => {
+            if lang() == Lang::En {
+                println!("  ✓ AudioEngine APO registration confirmed: {ae_path}");
+            } else {
+                println!("  ✓ AudioEngine APO 注册键确认：{ae_path}");
+            }
+        }
+        Err(e) => {
+            if lang() == Lang::En {
+                return Err(format!("AudioEngine APO registration missing: {ae_path} ({e})"));
+            } else {
+                return Err(format!("AudioEngine APO 注册键缺失：{ae_path}（{e}）"));
+            }
+        }
+    }
+
     Ok(())
 }
 
