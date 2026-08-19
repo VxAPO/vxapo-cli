@@ -20,7 +20,7 @@ use vxapo_driver::install::selector::operation::{
     InstallConfig, find_endpoint_path, write_install_config,
 };
 use vxapo_driver::sys::registry::RegKey;
-use windows::Win32::Foundation::{CloseHandle, HANDLE, HLOCAL, INVALID_HANDLE_VALUE, LocalFree};
+use windows::Win32::Foundation::{HANDLE, HLOCAL, INVALID_HANDLE_VALUE, LocalFree};
 use windows::Win32::Storage::FileSystem::{ReadFile, PIPE_ACCESS_INBOUND};
 use windows::Win32::System::Pipes::{
     ConnectNamedPipe, CreateNamedPipeW, DisconnectNamedPipe, PIPE_READMODE_MESSAGE, PIPE_TYPE_MESSAGE,
@@ -391,9 +391,10 @@ fn run_pipe_verify(
 
     // 清理：删注册表值、关管道（服务端线程随之退出）。
     clear_test_pipe_name();
-    unsafe {
-        let _ = CloseHandle(handle);
-    }
+    // 注意：**不能从主线程 CloseHandle(pipe)**——服务端线程正阻塞在
+    // ConnectNamedPipe 上，CloseHandle 会一直等该等待完成（导致主线程永久卡死，
+    // 只能靠全局看门狗 abort）。进程在 main 返回时由系统回收所有句柄，
+    // 这里直接放行即可。
     trace_emit(&trace_file, json!({"event": "trace", "step": "cleanup_done"}));
     // 注意：**不能 join 服务端线程**——它阻塞在 ConnectNamedPipe 等待 APO 连接，
     // 主线程 CloseHandle 无法可靠唤醒该等待；进程在 main 返回时结束所有线程，
