@@ -80,6 +80,7 @@ fn run_subcommand(args: &[String]) -> i32 {
                 commands::uninstall(&dev, json)
             }
         }
+        "register" => commands::register(),
         "config" => {
             if args.len() < 3 {
                 Err("config 用法：vxapo-cli config set -d <device> -f <file> 或 config show -d <device>".to_string())

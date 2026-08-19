@@ -71,6 +71,18 @@ impl<'a> EventSink<'a> {
     }
 }
 
+/// 阶段进度事件（pre-verify 步骤也上报，便于定位卡点；仅在有 progress 文件时输出）。
+pub(crate) fn emit_phase(progress_file: Option<&Path>, name: &str) {
+    let line = json!({"event": "phase", "name": name}).to_string();
+    println!("{line}");
+    if let Some(p) = progress_file {
+        if let Ok(mut f) = OpenOptions::new().create(true).append(true).open(p) {
+            let _ = writeln!(f, "{line}");
+            let _ = f.flush();
+        }
+    }
+}
+
 /// 模式短名（事件字段用）。
 fn mode_str(m: InstallMode) -> &'static str {
     match m {
@@ -398,8 +410,9 @@ fn create_pipe_server(full_path: &str) -> Result<windows::Win32::Foundation::HAN
 /// E_PENDING / AUDCLNT_E_DEVICE_INVALIDATED 等瞬时错误重试 5×500ms。
 fn trigger_apo_load(guid: &str, is_capture: bool) -> Result<(), String> {
     use windows::Win32::Media::Audio::{
-        AUDCLNT_E_DEVICE_INVALIDATED, AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_NOPERSIST,
-        IAudioClient, IMMDeviceEnumerator, MMDeviceEnumerator,
+        AUDCLNT_BUFFERFLAGS_SILENT, AUDCLNT_E_DEVICE_INVALIDATED, AUDCLNT_SHAREMODE_SHARED,
+        AUDCLNT_STREAMFLAGS_NOPERSIST, IAudioClient, IAudioRenderClient, IMMDeviceEnumerator,
+        MMDeviceEnumerator,
     };
     use windows::Win32::System::Com::{
         CLSCTX_ALL, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx, CoTaskMemFree,
@@ -431,11 +444,45 @@ fn trigger_apo_load(guid: &str, is_capture: bool) -> Result<(), String> {
                     None,
                 )
             };
+            if hr.is_err() {
+                // SAFETY: format 由 GetMixFormat 分配，须 CoTaskMemFree。
+                unsafe {
+                    CoTaskMemFree(Some(format as *const _));
+                }
+                return hr;
+            }
+            // 建图强化：渲染端点启动一次静音流，强制音频引擎实例化 APO
+            // （仅 Initialize 在某些槽位/机型上不触发 APO 实例化）。best-effort。
+            if !is_capture {
+                let _ = (|| -> windows::core::Result<()> {
+                    let render: IAudioRenderClient = unsafe { client.GetService() }?;
+                    let bufsize = unsafe { client.GetBufferSize() }?;
+                    let padding = unsafe { client.GetCurrentPadding() }?;
+                    let frames = bufsize.saturating_sub(padding);
+                    if frames > 0 {
+                        let ptr = unsafe { render.GetBuffer(frames) }?;
+                        let bytes = frames as usize * unsafe { (*format).nBlockAlign } as usize;
+                        unsafe {
+                            // SAFETY: ptr 指向引擎提供的可写缓冲区（GetBuffer 成功）。
+                            std::ptr::write_bytes(ptr, 0, bytes);
+                        }
+                        unsafe {
+                            render.ReleaseBuffer(frames, AUDCLNT_BUFFERFLAGS_SILENT.0 as u32)?;
+                        }
+                    }
+                    unsafe {
+                        client.Start()?;
+                    }
+                    std::thread::sleep(Duration::from_millis(300));
+                    let _ = unsafe { client.Stop() };
+                    Ok(())
+                })();
+            }
             // SAFETY: format 由 GetMixFormat 分配，须 CoTaskMemFree。
             unsafe {
                 CoTaskMemFree(Some(format as *const _));
             }
-            hr
+            Ok(())
         })();
 
         match result {

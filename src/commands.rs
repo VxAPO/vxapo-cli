@@ -14,6 +14,7 @@ use vxapo_driver::object::vx_reg_props::{CLSID_VXAPO_POST_MIX, CLSID_VXAPO_PRE_M
 
 use crate::i18n::{Lang, lang, tr};
 use crate::knowledge::KNOWN_APO_CLSIDS;
+use crate::verify::emit_phase;
 
 /// JSON 字符串转义（，无依赖手写最小实现）。
 pub(crate) fn json_escape(s: &str) -> String {
@@ -158,6 +159,11 @@ fn driver_binding_exists() -> bool {
         &format!(r"CLSID\{}\InprocServer32", clsid_str),
     )
     .is_ok()
+}
+
+/// 注册随包 driver DLL 的 CLSID 绑定（NSIS 安装后调用；幂等）。
+pub fn register() -> Result<(), String> {
+    auto_register_driver()
 }
 
 /// 设备三元组（resolve_device 产物，CLI 引用规范 4.4.1）。
@@ -616,6 +622,8 @@ pub fn install(
     progress_file: Option<&Path>,
 ) -> Result<(), String> {
     require_admin()?;
+    emit_phase(progress_file, "admin");
+    emit_phase(progress_file, "resolve");
     let dev = resolve_device(device_ref)?;
     let mut config = InstallConfig::default_config();
     match mode {
@@ -651,6 +659,7 @@ pub fn install(
     config.use_original_apo_postmix = !no_child;
 
     // 快照基线（安装前建立/替换，Phase C——只注册表，config 不属 CLI 快照）。
+    emit_phase(progress_file, "snapshot");
     if let Err(e) = snapshot_device(&dev.guid, true) {
         if !json {
             if lang() == Lang::En {
@@ -664,12 +673,15 @@ pub fn install(
     // 每次安装都刷新全局 APO 注册（幂等）。
     // 旧机器可能已有 CLSID→DLL 绑定，但 AudioEngine\AudioProcessingObjects 键
     // 是早期缺字段/缺 MaxInstances 的旧注册——只按「绑定存在」跳过会继续拒载。
+    emit_phase(progress_file, "register");
     auto_register_driver()?;
 
     if verify {
         // 先确保 config.toml 存在（缺省自动导入），再进入验证流程，
         // 使验证通过时的状态即最终可用状态。
+        emit_phase(progress_file, "config");
         ensure_default_config(&dev, json);
+        emit_phase(progress_file, "verify");
         crate::verify::install_verify(&dev, &config, timeout_secs, progress_file)
     } else {
         // DisableProtectedAudioDG、槽位/ProcessingModes 写入和安装后重启
