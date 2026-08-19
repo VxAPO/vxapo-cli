@@ -275,8 +275,8 @@ pub(crate) fn install_verify(
 fn run_pipe_verify(
     guid: &str,
     is_capture: bool,
-    expected_premix: bool,
-    expected_postmix: bool,
+    _expected_premix: bool,
+    _expected_postmix: bool,
     mode_name: &str,
     sink: &mut EventSink,
 ) -> Result<PipeReport, String> {
@@ -292,6 +292,7 @@ fn run_pipe_verify(
     let trace_file = sink.progress_file.map(|p| p.to_path_buf());
     // HANDLE 不是 Send，线程内以裸指针地址重建（CLI 进程内有效）。
     let server_handle_ptr = handle.0 as usize;
+    let server_trace = trace_file.clone();
     let _server = std::thread::spawn(move || {
         let server_handle = HANDLE(server_handle_ptr as *mut core::ffi::c_void);
         let mut buf: Vec<u8> = Vec::new();
@@ -302,6 +303,7 @@ fn run_pipe_verify(
                 // ERROR_PIPE_CONNECTED=535：客户端在 Connect 前已连上，视为成功。
                 let code = std::io::Error::last_os_error().raw_os_error().unwrap_or(0) as u32;
                 if code != 535 {
+                    trace_emit(&server_trace, json!({"event":"trace","step":"server_exit","err":code}));
                     break;
                 }
             }
@@ -320,6 +322,7 @@ fn run_pipe_verify(
                     let line: Vec<u8> = buf.drain(..=pos).collect();
                     let s = String::from_utf8_lossy(&line).trim().to_string();
                     if !s.is_empty() {
+                        trace_emit(&server_trace, json!({"event":"trace","step":"server_msg","line":s}));
                         let _ = tx.send(s);
                     }
                 }
@@ -373,15 +376,11 @@ fn run_pipe_verify(
     // 固定迭代次数 + 短超时（200ms × PIPE_WAIT_SECS*5），绝对有界。
     for _ in 0..(PIPE_WAIT_SECS * 5) {
         match rx.recv_timeout(Duration::from_millis(200)) {
-            Ok(line) => parse_pipe_message(&line, &mut report),
+            Ok(line) => {
+                trace_emit(&trace_file, json!({"event":"trace","step":"pipe_msg","line":line}));
+                parse_pipe_message(&line, &mut report);
+            }
             Err(_) => break,
-        }
-        let all_expected = report.premix_init
-            && (!is_capture || report.postmix_init)
-            && (!expected_premix || report.child_premix)
-            && (!expected_postmix || report.child_postmix);
-        if all_expected {
-            break;
         }
     }
     trace_emit(
