@@ -36,6 +36,9 @@ use crate::i18n::tr;
 
 /// 验证管道名（固定，与 driver `object/apo/test_pipe.rs` 约定一致）。
 const PIPE_NAME: &str = "VxAPODeviceTest";
+/// 管道服务端实例数：同一端点可能同时有 premix/postmix 等多个 APO 实例上报，
+/// 多实例避免 ERROR_PIPE_BUSY(231) 导致漏收消息。
+const PIPE_INSTANCES: u32 = 8;
 /// 全局键：HKLM\SOFTWARE\VxAPO\DeviceTestPipeName。
 const TEST_VALUE: &str = "DeviceTestPipeName";
 const TEST_KEY: &str = r"SOFTWARE\VxAPO";
@@ -275,7 +278,10 @@ fn run_pipe_verify(
     sink: &mut EventSink,
 ) -> Result<PipeReport, String> {
     let full_path = format!(r"\\.\pipe\{PIPE_NAME}");
-    let handle = create_pipe_server(&full_path)?;
+    // 多实例服务端：多个 APO 实例（premix/postmix/多设备）几乎同时连接，
+    // 单实例在两次 ConnectNamedPipe 之间的空窗会让后续客户端拿到
+    // ERROR_PIPE_BUSY(231)。8 个实例足够覆盖同一端点全部 APO 实例的并发连接。
+    let handles = create_pipe_servers(&full_path, PIPE_INSTANCES)?;
 
     write_test_pipe_name(PIPE_NAME)?;
     sink.emit(json!({"event": "test", "pipe": PIPE_NAME, "mode": mode_name}));
@@ -285,45 +291,48 @@ fn run_pipe_verify(
     let (tx, rx) = mpsc::channel::<String>();
     let trace_file = sink.progress_file.map(|p| p.to_path_buf());
     // HANDLE 不是 Send，线程内以裸指针地址重建（CLI 进程内有效）。
-    let server_handle_ptr = handle.0 as usize;
-    let server_trace = trace_file.clone();
-    let _server = std::thread::spawn(move || {
-        let server_handle = HANDLE(server_handle_ptr as *mut core::ffi::c_void);
-        let mut buf: Vec<u8> = Vec::new();
-        let mut chunk = [0u8; 512];
-        loop {
-            let connected = unsafe { ConnectNamedPipe(server_handle, None) };
-            if connected.is_err() {
-                // ERROR_PIPE_CONNECTED=535：客户端在 Connect 前已连上，视为成功。
-                let code = std::io::Error::last_os_error().raw_os_error().unwrap_or(0) as u32;
-                if code != 535 {
-                    trace_emit(&server_trace, json!({"event":"trace","step":"server_exit","err":code}));
-                    break;
-                }
-            }
-            buf.clear();
+    for handle in handles {
+        let server_handle_ptr = handle.0 as usize;
+        let server_trace = trace_file.clone();
+        let tx = tx.clone();
+        std::thread::spawn(move || {
+            let server_handle = HANDLE(server_handle_ptr as *mut core::ffi::c_void);
+            let mut buf: Vec<u8> = Vec::new();
+            let mut chunk = [0u8; 512];
             loop {
-                let mut read = 0u32;
-                if unsafe { ReadFile(server_handle, Some(&mut chunk), Some(&mut read), None) }.is_err()
-                {
-                    break;
-                }
-                if read == 0 {
-                    break;
-                }
-                buf.extend_from_slice(&chunk[..read as usize]);
-                while let Some(pos) = buf.iter().position(|&b| b == b'\n') {
-                    let line: Vec<u8> = buf.drain(..=pos).collect();
-                    let s = String::from_utf8_lossy(&line).trim().to_string();
-                    if !s.is_empty() {
-                        trace_emit(&server_trace, json!({"event":"trace","step":"server_msg","line":s}));
-                        let _ = tx.send(s);
+                let connected = unsafe { ConnectNamedPipe(server_handle, None) };
+                if connected.is_err() {
+                    // ERROR_PIPE_CONNECTED=535：客户端在 Connect 前已连上，视为成功。
+                    let code = std::io::Error::last_os_error().raw_os_error().unwrap_or(0) as u32;
+                    if code != 535 {
+                        trace_emit(&server_trace, json!({"event":"trace","step":"server_exit","err":code}));
+                        break;
                     }
                 }
+                buf.clear();
+                loop {
+                    let mut read = 0u32;
+                    if unsafe { ReadFile(server_handle, Some(&mut chunk), Some(&mut read), None) }.is_err()
+                    {
+                        break;
+                    }
+                    if read == 0 {
+                        break;
+                    }
+                    buf.extend_from_slice(&chunk[..read as usize]);
+                    while let Some(pos) = buf.iter().position(|&b| b == b'\n') {
+                        let line: Vec<u8> = buf.drain(..=pos).collect();
+                        let s = String::from_utf8_lossy(&line).trim().to_string();
+                        if !s.is_empty() {
+                            trace_emit(&server_trace, json!({"event":"trace","step":"server_msg","line":s}));
+                            let _ = tx.send(s);
+                        }
+                    }
+                }
+                let _ = unsafe { DisconnectNamedPipe(server_handle) };
             }
-            let _ = unsafe { DisconnectNamedPipe(server_handle) };
-        }
-    });
+        });
+    }
     trace_emit(&trace_file, json!({"event": "trace", "step": "server_spawned"}));
 
     // 触发 audiodg 建图。慢设备上 COM 调用可能耗时 5–8s，不再设触发级超时
@@ -397,7 +406,7 @@ fn trace_emit(progress_file: &Option<PathBuf>, event: serde_json::Value) {
 /// 实测 audiodg 的访问身份对不上 SYSTEM/Administrators ACE（CreateFileW 报
 /// ERROR_ACCESS_DENIED=5），EAPO 的验证管道同样允许 Everyone；验证管道仅存活
 /// 数秒且名称固定，放开 Everyone 可写是安全的。
-fn create_pipe_server(full_path: &str) -> Result<windows::Win32::Foundation::HANDLE, String> {
+fn create_pipe_servers(full_path: &str, count: u32) -> Result<Vec<windows::Win32::Foundation::HANDLE>, String> {
     // SAFETY: 无前置条件；SD 由 LocalFree 回收。
     let mut sd = PSECURITY_DESCRIPTOR(std::ptr::null_mut());
     unsafe {
@@ -416,27 +425,33 @@ fn create_pipe_server(full_path: &str) -> Result<windows::Win32::Foundation::HAN
         bInheritHandle: false.into(),
     };
 
-    // SAFETY: full_path 为合法管道名；sa 持有有效 SD。
-    let handle = unsafe {
-        CreateNamedPipeW(
-            &HSTRING::from(full_path),
-            PIPE_ACCESS_INBOUND,
-            PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE | PIPE_WAIT,
-            PIPE_UNLIMITED_INSTANCES,
-            0,
-            4096,
-            0,
-            Some(&sa),
-        )
-    };
+    let mut handles = Vec::with_capacity(count as usize);
+    for _ in 0..count {
+        // SAFETY: full_path 为合法管道名；sa 持有有效 SD。
+        let handle = unsafe {
+            CreateNamedPipeW(
+                &HSTRING::from(full_path),
+                PIPE_ACCESS_INBOUND,
+                PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE | PIPE_WAIT,
+                PIPE_UNLIMITED_INSTANCES,
+                0,
+                4096,
+                0,
+                Some(&sa),
+            )
+        };
+        if handle == INVALID_HANDLE_VALUE {
+            // 部分失败：已创建的实例由进程退出统一回收（线程阻塞在
+            // ConnectNamedPipe，主线程 CloseHandle 会等死，故不逐个关闭）。
+            return Err(tr("创建验证管道失败", "Failed to create verification pipe").to_string());
+        }
+        handles.push(handle);
+    }
     // SD 生命周期到此结束（CreateNamedPipeW 已复制）。
     unsafe {
         let _ = LocalFree(Some(HLOCAL(sd.0)));
     }
-    if handle == INVALID_HANDLE_VALUE {
-        return Err(tr("创建验证管道失败", "Failed to create verification pipe").to_string());
-    }
-    Ok(handle)
+    Ok(handles)
 }
 
 /// 触发指定端点 APO 建图：IMMDevice → IAudioClient → GetMixFormat → Initialize。
