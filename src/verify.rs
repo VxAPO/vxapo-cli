@@ -327,7 +327,7 @@ fn run_pipe_verify(
             let _ = unsafe { DisconnectNamedPipe(server_handle) };
         }
     });
-    trace_emit(&trace_file, "server_spawned");
+    trace_emit(&trace_file, json!({"event": "trace", "step": "server_spawned"}));
 
     // 触发 audiodg 建图。服务刚重启时 IMMDevice/IAudioClient 调用可能阻塞
     // （引擎未就绪），用看门狗线程限时：超时 → 清理 + 上报失败 + 强制退出
@@ -336,12 +336,18 @@ fn run_pipe_verify(
     let trigger_guid = guid.to_string();
     let trigger_trace = trace_file.clone();
     let trigger_thread = std::thread::spawn(move || {
-        trace_emit(&trigger_trace, "trigger_start");
+        trace_emit(&trigger_trace, json!({"event": "trace", "step": "trigger_start"}));
         let r = trigger_apo_load(&trigger_guid, is_capture);
-        trace_emit(&trigger_trace, "trigger_done");
+        match &r {
+            Ok(()) => trace_emit(&trigger_trace, json!({"event": "trace", "step": "trigger_ok"})),
+            Err(e) => trace_emit(
+                &trigger_trace,
+                json!({"event": "trace", "step": "trigger_err", "err": e}),
+            ),
+        }
         let _ = trigger_tx.send(r);
     });
-    trace_emit(&trace_file, "trigger_spawned");
+    trace_emit(&trace_file, json!({"event": "trace", "step": "trigger_spawned"}));
     match trigger_rx.recv_timeout(Duration::from_secs(TRIGGER_TIMEOUT_SECS)) {
         Ok(_) => {}
         Err(mpsc::RecvTimeoutError::Timeout) => {
@@ -356,16 +362,15 @@ fn run_pipe_verify(
         // 触发线程 panic/异常退出（未发送结果）：不致命，继续收集（可能计 0 分）。
         Err(mpsc::RecvTimeoutError::Disconnected) => {}
     }
-    trace_emit(&trace_file, "trigger_wait_done");
+    trace_emit(&trace_file, json!({"event": "trace", "step": "trigger_wait_done"}));
     let _ = trigger_thread.join();
 
     // 收集上报直到全部预期阶段到齐或超时。
-    trace_emit(&trace_file, "collect_start");
+    trace_emit(&trace_file, json!({"event": "trace", "step": "collect_start"}));
     let mut report = PipeReport::default();
-    let wait_deadline = Instant::now() + Duration::from_secs(PIPE_WAIT_SECS);
-    while Instant::now() < wait_deadline {
-        let remaining = wait_deadline.saturating_duration_since(Instant::now());
-        match rx.recv_timeout(remaining) {
+    // 固定迭代次数 + 短超时（200ms × PIPE_WAIT_SECS*5），绝对有界。
+    for _ in 0..(PIPE_WAIT_SECS * 5) {
+        match rx.recv_timeout(Duration::from_millis(200)) {
             Ok(line) => parse_pipe_message(&line, &mut report),
             Err(_) => break,
         }
@@ -377,12 +382,17 @@ fn run_pipe_verify(
             break;
         }
     }
+    trace_emit(
+        &trace_file,
+        json!({"event": "trace", "step": "collect_done", "messages": report.messages}),
+    );
 
     // 清理：删注册表值、关管道（服务端线程随之退出）。
     clear_test_pipe_name();
     unsafe {
         let _ = CloseHandle(handle);
     }
+    trace_emit(&trace_file, json!({"event": "trace", "step": "cleanup_done"}));
     // 注意：**不能 join 服务端线程**——它阻塞在 ConnectNamedPipe 等待 APO 连接，
     // 主线程 CloseHandle 无法可靠唤醒该等待；进程在 main 返回时结束所有线程，
     // 直接放行即可（阻塞线程不会阻止 Rust 进程退出）。
@@ -390,8 +400,8 @@ fn run_pipe_verify(
 }
 
 /// 步骤追踪（调试卡点）：与事件同写到 progress 文件 + stdout，App 忽略该事件类型。
-fn trace_emit(progress_file: &Option<PathBuf>, step: &str) {
-    let line = json!({"event": "trace", "step": step}).to_string();
+fn trace_emit(progress_file: &Option<PathBuf>, event: serde_json::Value) {
+    let line = event.to_string();
     println!("{line}");
     if let Some(p) = progress_file {
         if let Ok(mut f) = OpenOptions::new().create(true).append(true).open(p) {
