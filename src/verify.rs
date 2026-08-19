@@ -357,7 +357,9 @@ fn run_pipe_verify(
                 "event": "complete", "success": false, "attempts": 0,
                 "reason": "trigger_timeout",
             }));
-            std::process::exit(1);
+            // exit() 的 CRT/atexit 清理可能被阻塞的 COM 线程卡住 → 直接用 abort()，
+            // 事件已在上方写完，进程立即终止。
+            std::process::abort();
         }
         // 触发线程 panic/异常退出（未发送结果）：不致命，继续收集（可能计 0 分）。
         Err(mpsc::RecvTimeoutError::Disconnected) => {}
