@@ -40,14 +40,16 @@ const PIPE_NAME: &str = "VxAPODeviceTest";
 const TEST_VALUE: &str = "DeviceTestPipeName";
 const TEST_KEY: &str = r"SOFTWARE\VxAPO";
 
-/// 阶段超时（秒）。
-const STOP_TIMEOUT_SECS: u32 = 10;
-const START_TIMEOUT_SECS: u32 = 15;
-const PIPE_WAIT_SECS: u64 = 5;
+/// 阶段超时（秒）——安装必须快速给出结果，失败也别让用户等。
+const STOP_TIMEOUT_SECS: u32 = 3;
+const START_TIMEOUT_SECS: u32 = 5;
+const PIPE_WAIT_SECS: u64 = 2;
 /// 触发超时（秒）：服务重启后音频引擎 COM 调用可能阻塞，看门狗兜底。
-const TRIGGER_TIMEOUT_SECS: u64 = 8;
+const TRIGGER_TIMEOUT_SECS: u64 = 4;
 /// 服务 RUNNING 后等待音频引擎就绪的静默时间（毫秒），降低触发时阻塞概率。
-const POST_SERVICE_SETTLE_MS: u64 = 1000;
+const POST_SERVICE_SETTLE_MS: u64 = 300;
+/// 全局看门狗（秒）：无论任何线程/COM 调用卡死，进程都在 20s 内强制终止。
+const GLOBAL_WATCHDOG_SECS: u64 = 20;
 
 /// 事件输出：stdout 一行 + progress 文件追加一行。
 pub(crate) struct EventSink<'a> {
@@ -164,11 +166,12 @@ pub(crate) fn install_verify(
     timeout_secs: u64,
     progress_file: Option<&Path>,
 ) -> Result<(), String> {
-    // 全局看门狗：无论任何线程/COM 调用卡死，进程都必须在 timeout+60s 内退出，
-    // 安装流程永远不会无限挂起。
+    // 全局看门狗：无论任何线程/COM 调用卡死，进程都在 20s 内强制终止。
+    // 用 abort()（SIGABRT）而非 exit()，跳过 CRT/atexit 清理，避免清理本身被
+    // 其他阻塞线程卡死。
     let _watchdog = std::thread::spawn(move || {
-        std::thread::sleep(Duration::from_secs(timeout_secs.max(60) + 60));
-        let _ = std::process::exit(2);
+        std::thread::sleep(Duration::from_secs(GLOBAL_WATCHDOG_SECS));
+        let _ = std::process::abort();
     });
 
     let deadline = Instant::now() + Duration::from_secs(timeout_secs);
@@ -252,7 +255,9 @@ pub(crate) fn install_verify(
         }
     }
 
-    // 全部失败：保留最高分配置（不回滚），确保音频服务运行后报告失败。
+    // 全部失败：**回滚注册表**（uninstall_endpoint 清槽位/信息区/恢复 sysfx），
+    // 设备不残留"已安装"状态；确保音频服务运行后报告失败。
+    let _ = vxapo_driver::install::selector::operation::uninstall_endpoint(&dev.guid);
     let _ = vxapo_driver::install::audiodg::start_audio_service_with_dependents(START_TIMEOUT_SECS);
     sink.emit(json!({
         "event": "complete", "success": false,
