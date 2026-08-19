@@ -605,21 +605,16 @@ fn slot_friendly(clsid: &str) -> Option<String> {
     None
 }
 
-/// 强制重启音频服务，确保 audiodg 重新加载最新注册信息。
-fn restart_audio_service_force() {
-    let _ = std::process::Command::new("taskkill")
-        .args(["/f", "/im", "audiodg.exe"])
-        .output();
-    let _ = std::process::Command::new("net")
-        .args(["stop", "audiosrv"])
-        .output();
-    let _ = std::process::Command::new("net")
-        .args(["start", "audiosrv"])
-        .output();
-}
-
 /// install 命令（CLI 引用规范 5.1）。
-pub fn install(device_ref: &str, mode: Option<&str>, no_child: bool, json: bool) -> Result<(), String> {
+pub fn install(
+    device_ref: &str,
+    mode: Option<&str>,
+    no_child: bool,
+    json: bool,
+    verify: bool,
+    timeout_secs: u64,
+    progress_file: Option<&Path>,
+) -> Result<(), String> {
     require_admin()?;
     let dev = resolve_device(device_ref)?;
     let mut config = InstallConfig::default_config();
@@ -671,49 +666,60 @@ pub fn install(device_ref: &str, mode: Option<&str>, no_child: bool, json: bool)
     // 是早期缺字段/缺 MaxInstances 的旧注册——只按「绑定存在」跳过会继续拒载。
     auto_register_driver()?;
 
-    // DisableProtectedAudioDG、槽位/ProcessingModes 写入和安装后重启
-    // 均由 driver install_endpoint 全流程处理（CLI 不再重复）。
-    install_endpoint(&dev.guid, &dev.name, &dev.connection, &config, true)
-        .map_err(|e| {
-            if lang() == Lang::En {
-                format!("install_endpoint failed: {e} (use vxapo-cli snapshot diff -d {} to view changes)", dev.guid)
-            } else {
-                format!("install_endpoint 失败：{e}（可用 vxapo-cli snapshot diff -d {} 查看变更）", dev.guid)
-            }
-        })?;
-    if json {
-        println!(
-            "{{\"ok\":true,\"device\":\"{}\",\"mode\":\"{:?}\",\"message\":\"已安装\"}}",
-            json_escape(&dev.guid),
-            config.install_mode
-        );
+    if verify {
+        // 先确保 config.toml 存在（缺省自动导入），再进入验证流程，
+        // 使验证通过时的状态即最终可用状态。
+        ensure_default_config(&dev, json);
+        crate::verify::install_verify(&dev, &config, timeout_secs, progress_file)
     } else {
-        if lang() == Lang::En {
-                    println!("✓ Installed {} (mode {:?}, child APO keep={})", dev.guid, config.install_mode, !no_child);
+        // DisableProtectedAudioDG、槽位/ProcessingModes 写入和安装后重启
+        // 均由 driver install_endpoint 全流程处理（CLI 不再重复）。
+        install_endpoint(&dev.guid, &dev.name, &dev.connection, &config, true)
+            .map_err(|e| {
+                if lang() == Lang::En {
+                    format!("install_endpoint failed: {e} (use vxapo-cli snapshot diff -d {} to view changes)", dev.guid)
                 } else {
-                    println!("✓ 已安装 {}（模式 {:?}，子 APO 保留={}）", dev.guid, config.install_mode, !no_child);
+                    format!("install_endpoint 失败：{e}（可用 vxapo-cli snapshot diff -d {} 查看变更）", dev.guid)
                 }
-    }
-
-    // 强制重启音频服务，确保 audiodg 重新加载新注册的 APO。
-    if !json {
-        if lang() == Lang::En {
-            println!("  Restarting audio service to apply changes...");
+            })?;
+        if json {
+            println!(
+                "{{\"ok\":true,\"device\":\"{}\",\"mode\":\"{:?}\",\"message\":\"已安装\"}}",
+                json_escape(&dev.guid),
+                config.install_mode
+            );
         } else {
-            println!("  正在重启音频服务以应用变更…");
+            if lang() == Lang::En {
+                println!("✓ Installed {} (mode {:?}, child APO keep={})", dev.guid, config.install_mode, !no_child);
+            } else {
+                println!("✓ 已安装 {}（模式 {:?}，子 APO 保留={}）", dev.guid, config.install_mode, !no_child);
+            }
         }
-    }
-    restart_audio_service_force();
 
-    // per-device config.toml 检查（方案 A）：缺失时**自动从 exe 同级 .\config.toml 导入**，
-    // 避免「装完发现没配置」。约定：把 config.txt 放在 vxapo-cli.exe 同目录即可，
-    // 安装自动复制到 C:\ProgramData\VxAPO\{guid}\config.toml 供 APO 解析（audiodg-SYSTEM 可读）。
-    // config 写归 CLI（非 driver）。
+        // 重启音频服务（依赖服务感知 + 轮询 RUNNING，best-effort），
+        // 确保 audiodg 重新加载新注册的 APO。
+        if !json {
+            if lang() == Lang::En {
+                println!("  Restarting audio service to apply changes...");
+            } else {
+                println!("  正在重启音频服务以应用变更…");
+            }
+        }
+        let _ = vxapo_driver::install::audiodg::restart_audio_service_wait(10, 15);
+
+        ensure_default_config(&dev, json);
+        Ok(())
+    }
+}
+
+/// per-device config.toml 检查（方案 A）：缺失时自动从 exe 同级 `.\config.toml` 导入，
+/// 避免「装完发现没配置」。约定：把 config.toml 放在 vxapo-cli.exe 同目录即可，
+/// 安装自动复制到 C:\ProgramData\VxAPO\{guid}\config.toml 供 APO 解析。
+fn ensure_default_config(dev: &DeviceRef, json: bool) {
     match config_show(&dev.guid) {
         Ok(()) => {}
         Err(_) => {
             let path = config_path(&dev.guid).unwrap_or_default();
-            // 自动导入：exe 同级 config.toml（默认约定）。
             let exe_dir = std::env::current_exe()
                 .ok()
                 .and_then(|p| p.parent().map(|p| p.to_path_buf()))
@@ -749,29 +755,24 @@ pub fn install(device_ref: &str, mode: Option<&str>, no_child: bool, json: bool)
                     Err(e) => {
                         if !json {
                             if lang() == Lang::En {
-                                        println!("⚠ Failed to read {}: {e}", default_src.display());
-                                    } else {
-                                        println!("⚠ 读取 {} 失败：{e}", default_src.display());
-                                    }
+                                println!("⚠ Failed to read {}: {e}", default_src.display());
+                            } else {
+                                println!("⚠ 读取 {} 失败：{e}", default_src.display());
+                            }
                         }
                     }
                 }
-            } else {
-                if !json {
-                    if lang() == Lang::En {
-                        println!("⚠ No config.toml detected ({path}); APO will run without configuration.");
-                        println!("   Use: vxapo-cli config set -d <device> -f <your config file>");
-                    } else {
-                        println!("⚠ 未检测到 config.toml（{path}），APO 将按无配置运行。");
-                        println!("   请用 config set 写入：vxapo-cli config set -d <device> -f <你的配置文件>");
-                    }
+            } else if !json {
+                if lang() == Lang::En {
+                    println!("⚠ No config.toml detected ({path}); APO will run without configuration.");
+                    println!("   Use: vxapo-cli config set -d <device> -f <your config file>");
+                } else {
+                    println!("⚠ 未检测到 config.toml（{path}），APO 将按无配置运行。");
+                    println!("   请用 config set 写入：vxapo-cli config set -d <device> -f <你的配置文件>");
                 }
             }
         }
     }
-
-    // driver install_endpoint 已重启音频服务；这里只负责 config 导入。
-    Ok(())
 }
 
 /// uninstall 命令（CLI 引用规范 5.3）。
@@ -845,7 +846,8 @@ pub fn uninstall(device_ref: &str, json: bool) -> Result<(), String> {
     } else {
         println!("  正在重启音频服务以应用卸载…");
     }
-    restart_audio_service_force();
+    // 重启音频服务（依赖服务感知 + 轮询 RUNNING，best-effort），恢复系统音频。
+    let _ = vxapo_driver::install::audiodg::restart_audio_service_wait(10, 15);
 
     if json {
         if lang() == Lang::En {

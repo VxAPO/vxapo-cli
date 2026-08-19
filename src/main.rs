@@ -17,8 +17,10 @@ mod probe;
 mod reg;
 mod i18n;
 mod regdump;
+mod verify;
 
 use std::io::Write;
+use std::path::Path;
 
 use i18n::{Lang, lang, set_lang};
 
@@ -46,11 +48,12 @@ fn run_subcommand(args: &[String]) -> i32 {
     let result = match cmd {
         "list" | "status" => commands::list_devices(json),
         "install" => {
-            let (dev, mode, no_child) = parse_install(&args[1..]);
+            let (dev, mode, no_child, verify, timeout, progress_file) = parse_install(&args[1..]);
             if dev.is_empty() {
-                Err("install 用法：vxapo-cli install -d <device> [--mode LfxGfx|SfxMfx|SfxEfx] [--no-child]".to_string())
+                Err("install 用法：vxapo-cli install -d <device> [--mode LfxGfx|SfxMfx|SfxEfx] [--no-child] [--verify] [--timeout=<sec>] [--progress-file=<path>]".to_string())
             } else {
-                commands::install(&dev, mode.as_deref(), no_child, json)
+                let progress = progress_file.as_deref().map(Path::new);
+                commands::install(&dev, mode.as_deref(), no_child, json, verify, timeout, progress)
             }
         }
         "uninstall" => {
@@ -355,7 +358,7 @@ fn install_and_guide(dev: &commands::DeviceRef, dev_idx: usize) {
     }
 
     let no_child = !keep_child;
-    match commands::install(&dev.guid, None, no_child, false) {
+    match commands::install(&dev.guid, None, no_child, false, false, 180, None) {
         Ok(()) => {
             println!("✓ {}（SfxEfx，{}={keep_child}）。", tr!("安装完成", "Install complete"), tr!("子 APO 保留", "child APO keep"));
             println!("  {}：", tr!("调音", "Tuning"));
@@ -423,10 +426,13 @@ fn resolve_device_ref(idx: usize) -> Result<commands::DeviceRef, String> {
 }
 
 /// 解析 install 参数：`-d <device> [--mode X] [--no-child]`。
-fn parse_install(args: &[String]) -> (String, Option<String>, bool) {
+fn parse_install(args: &[String]) -> (String, Option<String>, bool, bool, u64, Option<String>) {
     let mut dev = String::new();
     let mut mode = None;
     let mut no_child = false;
+    let mut verify = false;
+    let mut timeout = 180u64;
+    let mut progress_file = None;
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
@@ -441,11 +447,22 @@ fn parse_install(args: &[String]) -> (String, Option<String>, bool) {
                 mode = args.get(i).cloned();
             }
             "--no-child" => no_child = true,
+            "--verify" => verify = true,
+            "--timeout" => {
+                i += 1;
+                if let Some(v) = args.get(i) {
+                    timeout = v.parse().unwrap_or(180);
+                }
+            }
+            "--progress-file" => {
+                i += 1;
+                progress_file = args.get(i).cloned();
+            }
             _ => {}
         }
         i += 1;
     }
-    (dev, mode, no_child)
+    (dev, mode, no_child, verify, timeout, progress_file)
 }
 
 /// config 子命令：`config set -d <device> -f <file>` / `config show -d <device>`。
@@ -535,7 +552,7 @@ fn print_help() {
         println!();
         println!("Subcommand mode: vxapo-cli <command> [options]");
         println!("  list / status                     List audio endpoints + slot usage + lost-slot markers");
-        println!("  install -d <device> [--mode LfxGfx|SfxMfx|SfxEfx] [--no-child]");
+        println!("  install -d <device> [--mode LfxGfx|SfxMfx|SfxEfx] [--no-child] [--verify] [--timeout=<sec>]");
         println!("  uninstall -d <device>");
         println!("  config set -d <device> -f <file>   Write per-device config.toml");
         println!("  config show -d <device>            Read back config.toml");
@@ -550,7 +567,7 @@ fn print_help() {
         println!();
         println!("子命令模式：vxapo-cli <命令> [参数]");
         println!("  list / status                     列出音频端点 + 槽位占用 + 失守标注");
-        println!("  install -d <device> [--mode LfxGfx|SfxMfx|SfxEfx] [--no-child]");
+        println!("  install -d <device> [--mode LfxGfx|SfxMfx|SfxEfx] [--no-child] [--verify] [--timeout=<sec>]");
         println!("  uninstall -d <device>");
         println!("  config set -d <device> -f <file>   写 per-device config.toml");
         println!("  config show -d <device>            读回 config.toml");
