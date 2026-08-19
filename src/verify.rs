@@ -10,7 +10,7 @@
 
 use std::fs::OpenOptions;
 use std::io::Write;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
@@ -110,9 +110,11 @@ struct PipeReport {
     postmix_init: bool,
     child_premix: bool,
     child_postmix: bool,
+    messages: u32,
 }
 
 fn parse_pipe_message(line: &str, report: &mut PipeReport) {
+    report.messages += 1;
     let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else {
         return;
     };
@@ -162,6 +164,13 @@ pub(crate) fn install_verify(
     timeout_secs: u64,
     progress_file: Option<&Path>,
 ) -> Result<(), String> {
+    // 全局看门狗：无论任何线程/COM 调用卡死，进程都必须在 timeout+60s 内退出，
+    // 安装流程永远不会无限挂起。
+    let _watchdog = std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_secs(timeout_secs.max(60) + 60));
+        let _ = std::process::exit(2);
+    });
+
     let deadline = Instant::now() + Duration::from_secs(timeout_secs);
     let is_capture = find_endpoint_path(&dev.guid)
         .map(|p| p.contains("Capture"))
@@ -221,6 +230,7 @@ pub(crate) fn install_verify(
             "event": "test", "mode": mode_name, "score": score, "max": max_score,
             "premix": report.premix_init, "postmix": report.postmix_init,
             "child_premix": report.child_premix, "child_postmix": report.child_postmix,
+            "messages": report.messages,
         }));
         if score > best_score {
             best_score = score;
@@ -274,6 +284,7 @@ fn run_pipe_verify(
     // 服务端线程：接受多个客户端连接（每个 APO 实例连一次、发一行即关），
     // 消息经 channel 送回主线程。
     let (tx, rx) = mpsc::channel::<String>();
+    let trace_file = sink.progress_file.map(|p| p.to_path_buf());
     // HANDLE 不是 Send，线程内以裸指针地址重建（CLI 进程内有效）。
     let server_handle_ptr = handle.0 as usize;
     let _server = std::thread::spawn(move || {
@@ -311,15 +322,21 @@ fn run_pipe_verify(
             let _ = unsafe { DisconnectNamedPipe(server_handle) };
         }
     });
+    trace_emit(&trace_file, "server_spawned");
 
     // 触发 audiodg 建图。服务刚重启时 IMMDevice/IAudioClient 调用可能阻塞
     // （引擎未就绪），用看门狗线程限时：超时 → 清理 + 上报失败 + 强制退出
     // （阻塞线程无法安全回收，短生命周期 CLI 直接退出进程）。
     let (trigger_tx, trigger_rx) = mpsc::channel::<Result<(), String>>();
     let trigger_guid = guid.to_string();
+    let trigger_trace = trace_file.clone();
     let trigger_thread = std::thread::spawn(move || {
-        let _ = trigger_tx.send(trigger_apo_load(&trigger_guid, is_capture));
+        trace_emit(&trigger_trace, "trigger_start");
+        let r = trigger_apo_load(&trigger_guid, is_capture);
+        trace_emit(&trigger_trace, "trigger_done");
+        let _ = trigger_tx.send(r);
     });
+    trace_emit(&trace_file, "trigger_spawned");
     match trigger_rx.recv_timeout(Duration::from_secs(TRIGGER_TIMEOUT_SECS)) {
         Ok(_) => {}
         Err(mpsc::RecvTimeoutError::Timeout) => {
@@ -334,9 +351,11 @@ fn run_pipe_verify(
         // 触发线程 panic/异常退出（未发送结果）：不致命，继续收集（可能计 0 分）。
         Err(mpsc::RecvTimeoutError::Disconnected) => {}
     }
+    trace_emit(&trace_file, "trigger_wait_done");
     let _ = trigger_thread.join();
 
     // 收集上报直到全部预期阶段到齐或超时。
+    trace_emit(&trace_file, "collect_start");
     let mut report = PipeReport::default();
     let wait_deadline = Instant::now() + Duration::from_secs(PIPE_WAIT_SECS);
     while Instant::now() < wait_deadline {
@@ -363,6 +382,18 @@ fn run_pipe_verify(
     // 主线程 CloseHandle 无法可靠唤醒该等待；进程在 main 返回时结束所有线程，
     // 直接放行即可（阻塞线程不会阻止 Rust 进程退出）。
     Ok(report)
+}
+
+/// 步骤追踪（调试卡点）：与事件同写到 progress 文件 + stdout，App 忽略该事件类型。
+fn trace_emit(progress_file: &Option<PathBuf>, step: &str) {
+    let line = json!({"event": "trace", "step": step}).to_string();
+    println!("{line}");
+    if let Some(p) = progress_file {
+        if let Ok(mut f) = OpenOptions::new().create(true).append(true).open(p) {
+            let _ = writeln!(f, "{line}");
+            let _ = f.flush();
+        }
+    }
 }
 
 /// 创建命名管道服务端（DACL：SYSTEM + Administrators）。
@@ -545,6 +576,7 @@ mod tests {
             postmix_init: true,
             child_premix: true,
             child_postmix: true,
+            messages: 4,
         };
         assert_eq!(score_of(&report, false, true, true), 33);
     }
@@ -556,6 +588,7 @@ mod tests {
             postmix_init: true,
             child_premix: true,
             child_postmix: true,
+            messages: 4,
         };
         assert_eq!(score_of(&report, true, true, true), 22);
     }
@@ -568,6 +601,7 @@ mod tests {
             postmix_init: true,
             child_premix: false,
             child_postmix: false,
+            messages: 2,
         };
         assert_eq!(score_of(&report, false, false, false), 33);
     }
@@ -579,6 +613,7 @@ mod tests {
             postmix_init: true,
             child_premix: false,
             child_postmix: true,
+            messages: 3,
         };
         // 期望 PreMix 子 APO 但未创建 → 缺 +2。
         assert_eq!(score_of(&report, false, true, true), 31);
