@@ -83,12 +83,12 @@ pub(crate) fn emit_phase(progress_file: Option<&Path>, name: &str) {
     }
 }
 
-/// 模式短名（事件字段用）。
+/// 模式名（事件字段用，用户端展示大写）。
 fn mode_str(m: InstallMode) -> &'static str {
     match m {
-        InstallMode::LfxGfx => "lfx_gfx",
-        InstallMode::SfxMfx => "sfx_mfx",
-        InstallMode::SfxEfx => "sfx_efx",
+        InstallMode::LfxGfx => "LFX_GFX",
+        InstallMode::SfxMfx => "SFX_MFX",
+        InstallMode::SfxEfx => "SFX_EFX",
     }
 }
 
@@ -235,6 +235,9 @@ pub(crate) fn install_verify(
         }
 
         if score == max_score {
+            // 成功后定向重启端点设备：让新 APO 配置立即生效，
+            // 避免用户需要在系统声音设置里来回切换设备才恢复正常播放。
+            let _ = vxapo_driver::install::audiodg::restart_endpoint_device(&dev.guid, is_capture);
             sink.emit(json!({
                 "event": "complete", "success": true, "mode": mode_name,
                 "score": score, "attempts": attempts,
@@ -611,8 +614,8 @@ mod tests {
 
     #[test]
     fn mode_str_matches_event_contract() {
-        assert_eq!(mode_str(InstallMode::LfxGfx), "lfx_gfx");
-        assert_eq!(mode_str(InstallMode::SfxMfx), "sfx_mfx");
-        assert_eq!(mode_str(InstallMode::SfxEfx), "sfx_efx");
+        assert_eq!(mode_str(InstallMode::LfxGfx), "LFX_GFX");
+        assert_eq!(mode_str(InstallMode::SfxMfx), "SFX_MFX");
+        assert_eq!(mode_str(InstallMode::SfxEfx), "SFX_EFX");
     }
 }
