@@ -276,7 +276,7 @@ fn run_pipe_verify(
     let (tx, rx) = mpsc::channel::<String>();
     // HANDLE 不是 Send，线程内以裸指针地址重建（CLI 进程内有效）。
     let server_handle_ptr = handle.0 as usize;
-    let server = std::thread::spawn(move || {
+    let _server = std::thread::spawn(move || {
         let server_handle = HANDLE(server_handle_ptr as *mut core::ffi::c_void);
         let mut buf: Vec<u8> = Vec::new();
         let mut chunk = [0u8; 512];
@@ -359,7 +359,9 @@ fn run_pipe_verify(
     unsafe {
         let _ = CloseHandle(handle);
     }
-    let _ = server.join();
+    // 注意：**不能 join 服务端线程**——它阻塞在 ConnectNamedPipe 等待 APO 连接，
+    // 主线程 CloseHandle 无法可靠唤醒该等待；进程在 main 返回时结束所有线程，
+    // 直接放行即可（阻塞线程不会阻止 Rust 进程退出）。
     Ok(report)
 }
 
