@@ -44,6 +44,10 @@ const TEST_KEY: &str = r"SOFTWARE\VxAPO";
 const STOP_TIMEOUT_SECS: u32 = 10;
 const START_TIMEOUT_SECS: u32 = 15;
 const PIPE_WAIT_SECS: u64 = 5;
+/// 触发超时（秒）：服务重启后音频引擎 COM 调用可能阻塞，看门狗兜底。
+const TRIGGER_TIMEOUT_SECS: u64 = 8;
+/// 服务 RUNNING 后等待音频引擎就绪的静默时间（毫秒），降低触发时阻塞概率。
+const POST_SERVICE_SETTLE_MS: u64 = 1000;
 
 /// 事件输出：stdout 一行 + progress 文件追加一行。
 pub(crate) struct EventSink<'a> {
@@ -183,6 +187,9 @@ pub(crate) fn install_verify(
         vxapo_driver::install::audiodg::start_audio_service_with_dependents(START_TIMEOUT_SECS)
             .map_err(|e| format!("启动音频服务失败：{e}"))?;
         sink.emit(json!({"event": "service", "action": "running"}));
+        // SCM 报 RUNNING 不代表音频引擎已就绪：先静默等待，避免后续
+        // IMMDevice/IAudioClient 激活在引擎启动窗口内无限期阻塞。
+        std::thread::sleep(Duration::from_millis(POST_SERVICE_SETTLE_MS));
 
         // 4. 管道验证（建管道 → 触发 → 收集 → 清理）。
         let expected_premix = read_child_apo_guid(&dev.guid, ChildApoKind::PreMix).is_some();
@@ -293,8 +300,29 @@ fn run_pipe_verify(
         }
     });
 
-    // 触发 audiodg 建图（失败不致命：收不到消息自然计 0 分）。
-    let _ = trigger_apo_load(guid, is_capture);
+    // 触发 audiodg 建图。服务刚重启时 IMMDevice/IAudioClient 调用可能阻塞
+    // （引擎未就绪），用看门狗线程限时：超时 → 清理 + 上报失败 + 强制退出
+    // （阻塞线程无法安全回收，短生命周期 CLI 直接退出进程）。
+    let (trigger_tx, trigger_rx) = mpsc::channel::<Result<(), String>>();
+    let trigger_guid = guid.to_string();
+    let trigger_thread = std::thread::spawn(move || {
+        let _ = trigger_tx.send(trigger_apo_load(&trigger_guid, is_capture));
+    });
+    match trigger_rx.recv_timeout(Duration::from_secs(TRIGGER_TIMEOUT_SECS)) {
+        Ok(_) => {}
+        Err(mpsc::RecvTimeoutError::Timeout) => {
+            clear_test_pipe_name();
+            sink.emit(json!({"event": "test", "mode": mode_name, "error": "trigger_timeout"}));
+            sink.emit(json!({
+                "event": "complete", "success": false, "attempts": 0,
+                "reason": "trigger_timeout",
+            }));
+            std::process::exit(1);
+        }
+        // 触发线程 panic/异常退出（未发送结果）：不致命，继续收集（可能计 0 分）。
+        Err(mpsc::RecvTimeoutError::Disconnected) => {}
+    }
+    let _ = trigger_thread.join();
 
     // 收集上报直到全部预期阶段到齐或超时。
     let mut report = PipeReport::default();
