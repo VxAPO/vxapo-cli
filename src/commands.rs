@@ -464,11 +464,11 @@ pub fn list_devices(json: bool) -> Result<(), String> {
                 _ => "null".to_string(),
             }).collect();
             let mut o = format!(
-                "{{\"index\":{i},\"name\":\"{}\",\"guid\":\"{}\",\"installed_version\":\"{}\",\"install_mode\":\"{:?}\",\"slots\":{{\"LFX\":{},\"GFX\":{},\"SFX\":{},\"MFX\":{},\"EFX\":{}}},\"sample_rate\":{sr},\"channels\":{ch},\"bit_depth\":{bd},\"kind\":\"{kind}\",\"volume\":{volume}",
+                "{{\"index\":{i},\"name\":\"{}\",\"guid\":\"{}\",\"installed_version\":\"{}\",\"install_mode\":\"{}\",\"slots\":{{\"LFX\":{},\"GFX\":{},\"SFX\":{},\"MFX\":{},\"EFX\":{}}},\"sample_rate\":{sr},\"channels\":{ch},\"bit_depth\":{bd},\"kind\":\"{kind}\",\"volume\":{volume}",
                 json_escape(&name),
                 json_escape(&guid),
                 json_escape(&d.installed_version),
-                d.install_mode,
+                crate::verify::mode_str(d.install_mode),
                 slots[0], slots[1], slots[2], slots[3], slots[4],
             );
             if let Some(eapo) = detect_eapo_status(&d.slots) {
@@ -852,14 +852,8 @@ pub fn uninstall(device_ref: &str, json: bool) -> Result<(), String> {
         }
     }
 
-    // 卸载成功后重启音频服务，恢复系统音频。
-    if lang() == Lang::En {
-        println!("  Restarting audio service to apply uninstall...");
-    } else {
-        println!("  正在重启音频服务以应用卸载…");
-    }
-    // 重启音频服务（依赖服务感知 + 轮询 RUNNING，best-effort），恢复系统音频。
-    let _ = vxapo_driver::install::audiodg::restart_audio_service_wait(10, 15);
+    // 卸载收尾对齐安装：不整服重启（避免二次打断）——
+    // uninstall_endpoint 已定向重启该端点设备并 ensure AudioSrv 运行。
 
     if json {
         if lang() == Lang::En {
