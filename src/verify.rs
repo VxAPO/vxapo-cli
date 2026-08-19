@@ -414,13 +414,17 @@ fn trace_emit(progress_file: &Option<PathBuf>, event: serde_json::Value) {
     }
 }
 
-/// 创建命名管道服务端（DACL：SYSTEM + Administrators）。
+/// 创建命名管道服务端（DACL：SYSTEM + Administrators + Everyone）。
+///
+/// 实测 audiodg 的访问身份对不上 SYSTEM/Administrators ACE（CreateFileW 报
+/// ERROR_ACCESS_DENIED=5），EAPO 的验证管道同样允许 Everyone；验证管道仅存活
+/// 数秒且名称固定，放开 Everyone 可写是安全的。
 fn create_pipe_server(full_path: &str) -> Result<windows::Win32::Foundation::HANDLE, String> {
     // SAFETY: 无前置条件；SD 由 LocalFree 回收。
     let mut sd = PSECURITY_DESCRIPTOR(std::ptr::null_mut());
     unsafe {
         ConvertStringSecurityDescriptorToSecurityDescriptorW(
-            &HSTRING::from("D:(A;;GA;;;SY)(A;;GA;;;BA)"),
+            &HSTRING::from("D:(A;;GA;;;SY)(A;;GA;;;BA)(A;;GA;;;WD)"),
             1,
             &mut sd,
             None,
