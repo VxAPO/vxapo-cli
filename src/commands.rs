@@ -16,7 +16,7 @@ use crate::i18n::{Lang, lang, tr};
 use crate::knowledge::KNOWN_APO_CLSIDS;
 use crate::verify::emit_phase;
 
-/// JSON 字符串转义（，无依赖手写最小实现）。
+/// JSON 字符串转义（无依赖手写最小实现）。
 pub(crate) fn json_escape(s: &str) -> String {
     let mut out = String::with_capacity(s.len() + 8);
     for c in s.chars() {

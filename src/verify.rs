@@ -44,8 +44,6 @@ const TEST_KEY: &str = r"SOFTWARE\VxAPO";
 const STOP_TIMEOUT_SECS: u32 = 3;
 const START_TIMEOUT_SECS: u32 = 5;
 const PIPE_WAIT_SECS: u64 = 2;
-/// 触发超时（秒）：服务重启后音频引擎 COM 调用可能阻塞，看门狗兜底。
-const TRIGGER_TIMEOUT_SECS: u64 = 4;
 /// 服务 RUNNING 后等待音频引擎就绪的静默时间（毫秒），降低触发时阻塞概率。
 const POST_SERVICE_SETTLE_MS: u64 = 300;
 /// 全局看门狗（秒）：无论任何线程/COM 调用卡死，进程都在 20s 内强制终止。
@@ -229,12 +227,8 @@ pub(crate) fn install_verify(
 
         // 5. 计分与事件。
         let score = score_of(&report, is_capture, expected_premix, expected_postmix);
-        sink.emit(json!({
-            "event": "test", "mode": mode_name, "score": score, "max": max_score,
-            "premix": report.premix_init, "postmix": report.postmix_init,
-            "child_premix": report.child_premix, "child_postmix": report.child_postmix,
-            "messages": report.messages,
-        }));
+        // 用户端只接收 mode；计分仅内部用于模式重试与 complete 事件。
+        sink.emit(json!({"event": "test", "mode": mode_name}));
         if score > best_score {
             best_score = score;
             best_mode = Some(*mode);
@@ -332,9 +326,9 @@ fn run_pipe_verify(
     });
     trace_emit(&trace_file, json!({"event": "trace", "step": "server_spawned"}));
 
-    // 触发 audiodg 建图。服务刚重启时 IMMDevice/IAudioClient 调用可能阻塞
-    // （引擎未就绪），用看门狗线程限时：超时 → 清理 + 上报失败 + 强制退出
-    // （阻塞线程无法安全回收，短生命周期 CLI 直接退出进程）。
+    // 触发 audiodg 建图。慢设备上 COM 调用可能耗时 5–8s，不再设触发级超时
+    // （避免误杀）；触发线程 panic 时 recv 返回 Disconnected，按"无消息"继续。
+    // 20s 全局看门狗仍作为最终兜底。
     let (trigger_tx, trigger_rx) = mpsc::channel::<Result<(), String>>();
     let trigger_guid = guid.to_string();
     let trigger_trace = trace_file.clone();
@@ -351,22 +345,7 @@ fn run_pipe_verify(
         let _ = trigger_tx.send(r);
     });
     trace_emit(&trace_file, json!({"event": "trace", "step": "trigger_spawned"}));
-    match trigger_rx.recv_timeout(Duration::from_secs(TRIGGER_TIMEOUT_SECS)) {
-        Ok(_) => {}
-        Err(mpsc::RecvTimeoutError::Timeout) => {
-            clear_test_pipe_name();
-            sink.emit(json!({"event": "test", "mode": mode_name, "error": "trigger_timeout"}));
-            sink.emit(json!({
-                "event": "complete", "success": false, "attempts": 0,
-                "reason": "trigger_timeout",
-            }));
-            // exit() 的 CRT/atexit 清理可能被阻塞的 COM 线程卡住 → 直接用 abort()，
-            // 事件已在上方写完，进程立即终止。
-            std::process::abort();
-        }
-        // 触发线程 panic/异常退出（未发送结果）：不致命，继续收集（可能计 0 分）。
-        Err(mpsc::RecvTimeoutError::Disconnected) => {}
-    }
+    let _ = trigger_rx.recv();
     trace_emit(&trace_file, json!({"event": "trace", "step": "trigger_wait_done"}));
     let _ = trigger_thread.join();
 
@@ -461,12 +440,12 @@ fn create_pipe_server(full_path: &str) -> Result<windows::Win32::Foundation::HAN
 }
 
 /// 触发指定端点 APO 建图：IMMDevice → IAudioClient → GetMixFormat → Initialize。
+/// 仅 Initialize、不启动/停止流（对齐 EAPO testAPOInstallation，避免干扰设备状态）。
 /// E_PENDING / AUDCLNT_E_DEVICE_INVALIDATED 等瞬时错误重试 5×500ms。
 fn trigger_apo_load(guid: &str, is_capture: bool) -> Result<(), String> {
     use windows::Win32::Media::Audio::{
-        AUDCLNT_BUFFERFLAGS_SILENT, AUDCLNT_E_DEVICE_INVALIDATED, AUDCLNT_SHAREMODE_SHARED,
-        AUDCLNT_STREAMFLAGS_NOPERSIST, IAudioClient, IAudioRenderClient, IMMDeviceEnumerator,
-        MMDeviceEnumerator,
+        AUDCLNT_E_DEVICE_INVALIDATED, AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_NOPERSIST,
+        IAudioClient, IMMDeviceEnumerator, MMDeviceEnumerator,
     };
     use windows::Win32::System::Com::{
         CLSCTX_ALL, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx, CoTaskMemFree,
@@ -504,33 +483,6 @@ fn trigger_apo_load(guid: &str, is_capture: bool) -> Result<(), String> {
                     CoTaskMemFree(Some(format as *const _));
                 }
                 return hr;
-            }
-            // 建图强化：渲染端点启动一次静音流，强制音频引擎实例化 APO
-            // （仅 Initialize 在某些槽位/机型上不触发 APO 实例化）。best-effort。
-            if !is_capture {
-                let _ = (|| -> windows::core::Result<()> {
-                    let render: IAudioRenderClient = unsafe { client.GetService() }?;
-                    let bufsize = unsafe { client.GetBufferSize() }?;
-                    let padding = unsafe { client.GetCurrentPadding() }?;
-                    let frames = bufsize.saturating_sub(padding);
-                    if frames > 0 {
-                        let ptr = unsafe { render.GetBuffer(frames) }?;
-                        let bytes = frames as usize * unsafe { (*format).nBlockAlign } as usize;
-                        unsafe {
-                            // SAFETY: ptr 指向引擎提供的可写缓冲区（GetBuffer 成功）。
-                            std::ptr::write_bytes(ptr, 0, bytes);
-                        }
-                        unsafe {
-                            render.ReleaseBuffer(frames, AUDCLNT_BUFFERFLAGS_SILENT.0 as u32)?;
-                        }
-                    }
-                    unsafe {
-                        client.Start()?;
-                    }
-                    std::thread::sleep(Duration::from_millis(300));
-                    let _ = unsafe { client.Stop() };
-                    Ok(())
-                })();
             }
             // SAFETY: format 由 GetMixFormat 分配，须 CoTaskMemFree。
             unsafe {
