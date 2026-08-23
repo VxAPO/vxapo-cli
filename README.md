@@ -44,7 +44,7 @@ VxAPO CLI 是 VxAPO 的命令行工具，负责设备管理、配置读写与诊
   NaN/inf 拒绝），driver 只在内存 clamp、不回写。
 - **诊断**：`verify` 复用 driver 的 `test_pipe` / 格式协商，保证“装了就能出声”。
 
-## 致谢 Equalizer APO
+## 设计参考与致谢
 
 安装模型（逐设备注册 APO 槽位、保留原 APO 为子 APO）与验证流程的设计
 参考了 [Equalizer APO](https://sourceforge.net/projects/equalizerapo/) 的实践；
@@ -195,7 +195,7 @@ verification; registry writes are funneled through the driver's unified transact
 - **Diagnostics**: `verify` reuses the driver's `test_pipe` / format negotiation to
   guarantee "installed = working".
 
-## Acknowledgments: Equalizer APO
+## Design references & acknowledgments
 
 The install model (per-device APO slot registration, preserving the original APO as a
 child) and the verification workflow are inspired by
