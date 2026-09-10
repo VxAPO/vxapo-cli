@@ -81,6 +81,7 @@ fn run_subcommand(args: &[String]) -> i32 {
             }
         }
         "register" => commands::register(),
+        "stale" => run_stale(&args[1..], json),
         "config" => {
             if args.len() < 3 {
                 Err("config 用法：vxapo-cli config set -d <device> -f <file> 或 config show -d <device>".to_string())
@@ -111,6 +112,101 @@ fn run_subcommand(args: &[String]) -> i32 {
             }
             1
         }
+    }
+}
+
+/// `stale list` / `stale migrate` / `stale cleanup` 参数解析。
+fn run_stale(args: &[String], json: bool) -> Result<(), String> {
+    let sub = args.first().map(String::as_str).unwrap_or("list");
+    match sub {
+        "list" => commands::stale_list(json),
+        "migrate" => {
+            let mut from = String::new();
+            let mut to = String::new();
+            let mut config_from: Option<String> = None;
+            let mut snapshot_from: Option<String> = None;
+            let mut i = 1;
+            while i < args.len() {
+                match args[i].as_str() {
+                    "--from" | "-f" => {
+                        i += 1;
+                        from = args.get(i).cloned().unwrap_or_default();
+                    }
+                    "--to" | "-t" => {
+                        i += 1;
+                        to = args.get(i).cloned().unwrap_or_default();
+                    }
+                    "--config-from" => {
+                        i += 1;
+                        config_from = args.get(i).cloned();
+                    }
+                    "--snapshot-from" => {
+                        i += 1;
+                        snapshot_from = args.get(i).cloned();
+                    }
+                    _ => {}
+                }
+                i += 1;
+            }
+            if from.is_empty() || to.is_empty() {
+                return Err(
+                    "stale migrate 用法：vxapo-cli stale migrate --from <oldGuid> --to <newGuid> [--config-from <guid>] [--snapshot-from <guid>]"
+                        .to_string(),
+                );
+            }
+            commands::stale_migrate(
+                &from,
+                &to,
+                config_from.as_deref(),
+                snapshot_from.as_deref(),
+                json,
+            )
+        }
+        "cleanup" => {
+            let mut guid = String::new();
+            let mut i = 1;
+            while i < args.len() {
+                match args[i].as_str() {
+                    "-d" | "--device" => {
+                        i += 1;
+                        guid = args.get(i).cloned().unwrap_or_default();
+                    }
+                    other if guid.is_empty() && !other.starts_with('-') => {
+                        guid = other.to_string();
+                    }
+                    _ => {}
+                }
+                i += 1;
+            }
+            if guid.is_empty() {
+                return Err("stale cleanup 用法：vxapo-cli stale cleanup -d <guid>".to_string());
+            }
+            commands::stale_cleanup(&guid, json)
+        }
+        "fix-acl" => {
+            let mut guid = String::new();
+            let mut i = 1;
+            while i < args.len() {
+                match args[i].as_str() {
+                    "-d" | "--device" => {
+                        i += 1;
+                        guid = args.get(i).cloned().unwrap_or_default();
+                    }
+                    other if guid.is_empty() && !other.starts_with('-') => {
+                        guid = other.to_string();
+                    }
+                    _ => {}
+                }
+                i += 1;
+            }
+            if guid.is_empty() {
+                return Err("stale fix-acl 用法：vxapo-cli stale fix-acl -d <guid>".to_string());
+            }
+            commands::stale_fix_acl(&guid, json)
+        }
+        _ => Err(format!(
+            "未知 stale 子命令：{sub}（可用 list / migrate / cleanup / fix-acl）"
+        )),
     }
 }
 

@@ -7,7 +7,12 @@ use std::path::Path;
 
 use vxapo_driver::install::device::info::enumerate_devices;
 use vxapo_driver::install::device::slots::{ChildApoKind, child_apo_key_exists, read_child_apo_guid};
-use vxapo_driver::install::selector::operation::{InstallConfig, install_endpoint, uninstall_endpoint};
+use vxapo_driver::install::device::stale::{
+    cleanup_orphan, fix_config_acl, list_stale_installs, migrate_install,
+};
+use vxapo_driver::install::selector::operation::{
+    find_endpoint_path, install_endpoint, uninstall_endpoint, InstallConfig,
+};
 use vxapo_driver::object::dll_exports::register_apo_with_path;
 use vxapo_driver::sys::com::prelude::guid_to_string;
 use vxapo_driver::object::vx_reg_props::{CLSID_VXAPO_POST_MIX, CLSID_VXAPO_PRE_MIX};
@@ -433,6 +438,7 @@ pub fn list_devices(json: bool) -> Result<(), String> {
             let ep = d.endpoint.as_ref();
             let name = ep.map(|e| e.friendly_name.clone()).unwrap_or_else(|| "(未命名)".to_string());
             let guid = ep.map(|e| e.endpoint_guid.clone()).unwrap_or_default();
+            let device_id = ep.map(|e| e.device_id.clone()).unwrap_or_default();
             let (sr, ch, bd, _k) = formats
                 .get(&guid.to_uppercase())
                 .cloned()
@@ -464,9 +470,10 @@ pub fn list_devices(json: bool) -> Result<(), String> {
                 _ => "null".to_string(),
             }).collect();
             let mut o = format!(
-                "{{\"index\":{i},\"name\":\"{}\",\"guid\":\"{}\",\"installed_version\":\"{}\",\"install_mode\":\"{}\",\"slots\":{{\"LFX\":{},\"GFX\":{},\"SFX\":{},\"MFX\":{},\"EFX\":{}}},\"sample_rate\":{sr},\"channels\":{ch},\"bit_depth\":{bd},\"kind\":\"{kind}\",\"volume\":{volume}",
+                "{{\"index\":{i},\"name\":\"{}\",\"guid\":\"{}\",\"device_id\":\"{}\",\"connection\":\"\",\"installed_version\":\"{}\",\"install_mode\":\"{}\",\"slots\":{{\"LFX\":{},\"GFX\":{},\"SFX\":{},\"MFX\":{},\"EFX\":{}}},\"sample_rate\":{sr},\"channels\":{ch},\"bit_depth\":{bd},\"kind\":\"{kind}\",\"volume\":{volume}",
                 json_escape(&name),
                 json_escape(&guid),
+                json_escape(&device_id),
                 json_escape(&d.installed_version),
                 crate::verify::mode_str(d.install_mode),
                 slots[0], slots[1], slots[2], slots[3], slots[4],
@@ -787,10 +794,131 @@ fn ensure_default_config(dev: &DeviceRef, json: bool) {
     }
 }
 
+/// 旧 GUID 残留列表：扫描软件信息区 / ProgramData，并匹配当前活跃端点。
+pub fn stale_list(json: bool) -> Result<(), String> {
+    let list = list_stale_installs().map_err(|e| e.to_string())?;
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string(&list).map_err(|e| e.to_string())?
+        );
+        return Ok(());
+    }
+    if list.is_empty() {
+        println!("{}", tr("（无旧 GUID 残留）", "(no stale GUID records)"));
+        return Ok(());
+    }
+    for item in list {
+        println!("{}  {}", item.guid, item.target_state);
+        println!("     device: {}", item.device_instance_id);
+        if let Some(target) = item.target_guid {
+            println!(
+                "     target: {}  {}",
+                target,
+                item.target_name.unwrap_or_default()
+            );
+        }
+        println!(
+            "     mode: {}  config: {}  snapshot: {}",
+            item.inferred_mode,
+            item.config_path.unwrap_or_else(|| "-".to_string()),
+            item.snapshot_path.unwrap_or_else(|| "-".to_string())
+        );
+    }
+    Ok(())
+}
+
+/// 迁移旧 GUID 安装到当前端点，并清理旧记录。
+pub fn stale_migrate(
+    from: &str,
+    to: &str,
+    config_from: Option<&str>,
+    snapshot_from: Option<&str>,
+    json: bool,
+) -> Result<(), String> {
+    require_admin()?;
+    // 与 install/uninstall 一致：先停音频服务并结束残留 audiodg，
+    // 避免端点槽位/信息区在迁移写入时被占用。
+    let _ = vxapo_driver::install::audiodg::stop_audio_service();
+    let _ = std::process::Command::new("taskkill")
+        .args(["/f", "/im", "audiodg.exe"])
+        .output();
+    std::thread::sleep(std::time::Duration::from_millis(1500));
+    let report = match migrate_install(from, to, config_from, snapshot_from) {
+        Ok(report) => report,
+        Err(e) => {
+            let _ = std::process::Command::new("net")
+                .args(["start", "audiosrv"])
+                .output();
+            return Err(e.to_string());
+        }
+    };
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string(&report).map_err(|e| e.to_string())?
+        );
+    } else {
+        println!(
+            "{} {} -> {}",
+            tr("✓ 已迁移", "✓ migrated"),
+            from,
+            to
+        );
+        if !report.warnings.is_empty() {
+            for w in report.warnings {
+                eprintln!("⚠ {w}");
+            }
+        }
+    }
+    Ok(())
+}
+
+/// 清理无法匹配活跃端点的旧 GUID 记录。
+pub fn stale_cleanup(guid: &str, json: bool) -> Result<(), String> {
+    require_admin()?;
+    cleanup_orphan(guid).map_err(|e| e.to_string())?;
+    if json {
+        println!(
+            "{{\"ok\":true,\"device\":\"{}\",\"message\":\"cleaned\"}}",
+            json_escape(guid)
+        );
+    } else {
+        println!("✓ {} {guid}", tr("已清理", "cleaned"));
+    }
+    Ok(())
+}
+
+/// 修复迁移后 config/snapshot 的用户 ACL。
+pub fn stale_fix_acl(guid: &str, json: bool) -> Result<(), String> {
+    require_admin()?;
+    fix_config_acl(guid).map_err(|e| e.to_string())?;
+    if json {
+        println!(
+            "{{\"ok\":true,\"device\":\"{}\",\"message\":\"acl-fixed\"}}",
+            json_escape(guid)
+        );
+    } else {
+        println!("✓ {guid} ACL fixed");
+    }
+    Ok(())
+}
+
 /// uninstall 命令（CLI 引用规范 5.3）。
 pub fn uninstall(device_ref: &str, json: bool) -> Result<(), String> {
     require_admin()?;
     let dev = resolve_device(device_ref)?;
+    // 端点键已被 Windows 重新枚举移除，但 VxAPO 自己的旧记录还在：
+    // 直接走残留清理，避免 find_endpoint_path 失败后留下 Child APOs / 配置目录。
+    if find_endpoint_path(&dev.guid).is_err() {
+        let stale = list_stale_installs().map_err(|e| e.to_string())?;
+        if stale
+            .iter()
+            .any(|s| s.guid.eq_ignore_ascii_case(&dev.guid))
+        {
+            return stale_cleanup(&dev.guid, json);
+        }
+    }
     if !snapshot_exists(&dev.guid) {
         if lang() == Lang::En {
             return Err("No baseline to compare - snapshot does not exist (run install first to create one)".to_string());
