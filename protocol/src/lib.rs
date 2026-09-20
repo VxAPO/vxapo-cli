@@ -372,8 +372,10 @@ pub struct StaleInstall {
     /// 命中来源；未命中为 `null`。
     pub matched_by: Option<StaleMatchedBy>,
     pub config_path: Option<String>,
+    #[ts(type = "number")]
     pub config_mtime_ms: Option<u64>,
     pub snapshot_path: Option<String>,
+    #[ts(type = "number")]
     pub snapshot_mtime_ms: Option<u64>,
     pub premix_slot: Option<String>,
     pub postmix_slot: Option<String>,

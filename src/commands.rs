@@ -121,6 +121,7 @@ pub fn require_admin() -> Result<(), String> {
 // ── 子模块（注册 / 状态 / 安装 / 卸载 / 配置转换 / 快照）──────────────────
 
 mod convert;
+mod effects;
 mod install;
 mod register;
 mod snapshot;
@@ -128,6 +129,7 @@ mod status;
 mod uninstall;
 
 pub use convert::{config_convert, config_set, config_show};
+pub use effects::effects_schema;
 pub use install::{
     install, preview_install, stale_cleanup, stale_fix_acl, stale_list, stale_migrate,
 };

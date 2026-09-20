@@ -320,3 +320,13 @@ mod tests {
         assert_eq!((dev.as_str(), file.as_str()), ("DEV", "cfg.toml"));
     }
 }
+/// `effects` 子命令：`effects schema [--json]`（参数表透传，见 `commands::effects_schema`）。
+pub(super) fn run_effects(args: &[String], json: bool) -> Result<(), String> {
+    match args.first().map(String::as_str) {
+        Some("schema") => commands::effects_schema(json),
+        other => Err(format!(
+            "未知 effects 子命令：{}（可用 schema）",
+            other.unwrap_or("")
+        )),
+    }
+}
