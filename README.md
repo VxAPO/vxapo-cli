@@ -141,6 +141,16 @@ vxapo-cli snapshot restore -d <device>
 
 快照只保存注册表基线，用于验证和回滚安装/卸载变更。
 
+#### 效果器参数表
+
+```bash
+vxapo-cli effects schema
+vxapo-cli effects schema --json
+```
+
+参数范围/步进与默认值由 driver 的 `effect_param_specs()` 产出，CLI 只透传；App 的
+`npm run sync:driver-schema` 消费 `--json` 生成 `effects.generated.ts`，两端不重复维护。
+
 ## 文档
 
 项目文档见 `../vxapo-docs`，详细规范见 `../vxapo-docs/cli` 与 `../vxapo-docs/driver`。
@@ -310,6 +320,17 @@ vxapo-cli snapshot restore -d <device>
 
 Snapshots are registry-only baselines used to verify and roll back install/uninstall
 changes.
+
+#### Effect parameter schema
+
+```bash
+vxapo-cli effects schema
+vxapo-cli effects schema --json
+```
+
+Ranges/steps/defaults come from the driver's `effect_param_specs()`; the CLI only relays
+them. The App's `npm run sync:driver-schema` consumes `--json` to generate
+`effects.generated.ts`, so both sides share a single source of truth.
 
 ## Documentation
 
