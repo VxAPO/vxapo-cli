@@ -15,10 +15,10 @@ use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use serde_json::json;
-use vxapo_driver::install::device::info::find_endpoint_path;
-use vxapo_driver::install::device::slots::{ChildApoKind, InstallMode, read_child_apo_guid};
-use vxapo_driver::install::selector::operation::{InstallConfig, write_install_config};
-use vxapo_driver::sys::registry::RegKey;
+use vxapo_driver::{
+    find_endpoint_path, read_child_apo_guid, write_install_config, ChildApoKind, InstallConfig,
+    InstallMode, RegKey,
+};
 use windows::Win32::Foundation::{HANDLE, HLOCAL, INVALID_HANDLE_VALUE, LocalFree};
 use windows::Win32::Storage::FileSystem::{ReadFile, PIPE_ACCESS_INBOUND};
 use windows::Win32::System::Pipes::{
@@ -202,13 +202,13 @@ pub(crate) fn install_verify(
 
         // 2. 停 AudioSrv（含依赖服务）。
         sink.emit(json!({"event": "service", "action": "stopping"}));
-        vxapo_driver::install::audiodg::stop_audio_service_with_dependents(STOP_TIMEOUT_SECS)
+        vxapo_driver::stop_audio_service_with_dependents(STOP_TIMEOUT_SECS)
             .map_err(|e| format!("停止音频服务失败：{e}"))?;
         sink.emit(json!({"event": "service", "action": "stopped"}));
 
         // 3. 启动 AudioSrv（含依赖服务，轮询 RUNNING）。
         sink.emit(json!({"event": "service", "action": "starting"}));
-        vxapo_driver::install::audiodg::start_audio_service_with_dependents(START_TIMEOUT_SECS)
+        vxapo_driver::start_audio_service_with_dependents(START_TIMEOUT_SECS)
             .map_err(|e| format!("启动音频服务失败：{e}"))?;
         sink.emit(json!({"event": "service", "action": "running"}));
         // SCM 报 RUNNING 不代表音频引擎已就绪：先静默等待，避免后续
@@ -253,8 +253,8 @@ pub(crate) fn install_verify(
 
     // 全部失败：**回滚注册表**（uninstall_endpoint 清槽位/信息区/恢复 sysfx），
     // 设备不残留"已安装"状态；确保音频服务运行后报告失败。
-    let _ = vxapo_driver::install::selector::operation::uninstall_endpoint(&dev.guid);
-    let _ = vxapo_driver::install::audiodg::start_audio_service_with_dependents(START_TIMEOUT_SECS);
+    let _ = vxapo_driver::uninstall_endpoint(&dev.guid);
+    let _ = vxapo_driver::start_audio_service_with_dependents(START_TIMEOUT_SECS);
     sink.emit(json!({
         "event": "complete", "success": false,
         "best_mode": best_mode.map(mode_str),

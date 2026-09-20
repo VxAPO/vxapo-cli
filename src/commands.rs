@@ -5,17 +5,12 @@
 
 use std::path::Path;
 
-use vxapo_driver::install::device::info::{enumerate_devices, find_endpoint_path};
-use vxapo_driver::install::device::slots::{ChildApoKind, child_apo_key_exists, read_child_apo_guid};
-use vxapo_driver::install::device::stale::{
-    cleanup_orphan, fix_config_acl, list_stale_installs,
+use vxapo_driver::{
+    child_apo_key_exists, cleanup_orphan, enumerate_devices, find_endpoint_path, fix_config_acl,
+    guid_to_string, install_endpoint, list_stale_installs, migrate_install, read_child_apo_guid,
+    register_apo_with_path, uninstall_endpoint, ChildApoKind, InstallConfig,
+    CLSID_VXAPO_POST_MIX, CLSID_VXAPO_PRE_MIX,
 };
-use vxapo_driver::install::selector::operation::{
-    install_endpoint, migrate_install, uninstall_endpoint, InstallConfig,
-};
-use vxapo_driver::object::dll_exports::register_apo_with_path;
-use vxapo_driver::sys::com::prelude::guid_to_string;
-use vxapo_driver::object::vx_reg_props::{CLSID_VXAPO_POST_MIX, CLSID_VXAPO_PRE_MIX};
 
 use crate::i18n::{Lang, lang, tr};
 use crate::knowledge::KNOWN_APO_CLSIDS;
@@ -66,7 +61,7 @@ fn auto_register_driver() -> Result<(), String> {
         // 旧版注册可能缺 AudioEngine\AudioProcessingObjects 键/字段，
         // 只按「绑定存在」跳过会导致父槽位仍不加载。
         let clsid_str = guid_to_string(&CLSID_VXAPO_PRE_MIX);
-        vxapo_driver::sys::registry::RegKey::open(
+        vxapo_driver::RegKey::open(
             windows::Win32::System::Registry::HKEY_CLASSES_ROOT,
             &format!(r"CLSID\{}\InprocServer32", clsid_str),
         )
@@ -101,7 +96,7 @@ fn auto_register_driver() -> Result<(), String> {
     }
     // 回读验证 CLSID 绑定（PreMix 即可，两者同路径）。
     let clsid_str = guid_to_string(&CLSID_VXAPO_PRE_MIX);
-    let check = vxapo_driver::sys::registry::RegKey::open(
+    let check = vxapo_driver::RegKey::open(
         windows::Win32::System::Registry::HKEY_CLASSES_ROOT,
         &format!(r"CLSID\{}\InprocServer32", clsid_str),
     );
@@ -133,7 +128,7 @@ fn auto_register_driver() -> Result<(), String> {
 
     // 回读验证 AudioEngine APO 注册键：缺失会导致引擎静默拒载。
     let ae_path = format!(r"AudioEngine\AudioProcessingObjects\{}", clsid_str);
-    match vxapo_driver::sys::registry::RegKey::open(
+    match vxapo_driver::RegKey::open(
         windows::Win32::System::Registry::HKEY_CLASSES_ROOT,
         &ae_path,
     ) {
@@ -159,7 +154,7 @@ fn auto_register_driver() -> Result<(), String> {
 /// 校验 CLSID→DLL 绑定是否已存在（避免每次 install 重复注册）。
 fn driver_binding_exists() -> bool {
     let clsid_str = guid_to_string(&CLSID_VXAPO_PRE_MIX);
-    vxapo_driver::sys::registry::RegKey::open(
+    vxapo_driver::RegKey::open(
         windows::Win32::System::Registry::HKEY_CLASSES_ROOT,
         &format!(r"CLSID\{}\InprocServer32", clsid_str),
     )
@@ -209,7 +204,7 @@ pub fn preview_install(device_ref: &str) -> Result<String, String> {
     }];
     for (i, val) in d.slots.iter().enumerate() {
         let label = match val {
-            vxapo_driver::install::device::slots::SlotValue::Guid(g) => {
+            vxapo_driver::SlotValue::Guid(g) => {
                 let gs = format!("{g:?}");
                 slot_friendly(&gs).unwrap_or_else(|| gs.clone())
             }
@@ -280,13 +275,13 @@ pub fn resolve_device(device_ref: &str) -> Result<DeviceRef, String> {
 pub fn require_admin() -> Result<(), String> {
     let probe_key = r"SOFTWARE\VxAPO\CLIProbe";
     let root = windows::Win32::System::Registry::HKEY_LOCAL_MACHINE;
-    match vxapo_driver::sys::registry::RegKey::create(root, probe_key) {
+    match vxapo_driver::RegKey::create(root, probe_key) {
         Ok(key) => {
             // 写入探测值：有 HKLM 写权限才成功。
             let probe_ok = key.write_sz("CLIProbe", "1").is_ok();
             let _ = key.delete_value("CLIProbe");
             drop(key);
-            let _ = vxapo_driver::sys::registry::RegKey::open(root, probe_key)
+            let _ = vxapo_driver::RegKey::open(root, probe_key)
                 .and_then(|k| k.delete_sub_key(probe_key));
             if probe_ok {
                 Ok(())
@@ -341,7 +336,7 @@ pub fn show_device_status(device_ref: &str) -> Result<(), String> {
     let slot_names = ["LFX", "GFX", "SFX", "MFX", "EFX"];
     for (s, val) in d.slots.iter().enumerate() {
         let label = match val {
-            vxapo_driver::install::device::slots::SlotValue::Guid(g) => {
+            vxapo_driver::SlotValue::Guid(g) => {
                 let gs = format!("{g:?}");
                 slot_friendly(&gs).unwrap_or_else(|| gs.clone())
             }
@@ -462,7 +457,7 @@ pub fn list_devices(json: bool) -> Result<(), String> {
                     .unwrap_or_else(|| "null".to_string())
             };
             let slots: Vec<String> = d.slots.iter().map(|v| match v {
-                vxapo_driver::install::device::slots::SlotValue::Guid(g) => {
+                vxapo_driver::SlotValue::Guid(g) => {
                     let gs = format!("{g:?}");
                     let label = slot_friendly(&gs).unwrap_or_else(|| gs.clone());
                     format!("\"{}\"", json_escape(&label))
@@ -513,7 +508,7 @@ pub fn list_devices(json: bool) -> Result<(), String> {
         let slot_names = ["LFX", "GFX", "SFX", "MFX", "EFX"];
         for (s, val) in d.slots.iter().enumerate() {
             let label = match val {
-                vxapo_driver::install::device::slots::SlotValue::Guid(g) => {
+                vxapo_driver::SlotValue::Guid(g) => {
                     let gs = format!("{g:?}");
                     slot_friendly(&gs).unwrap_or_else(|| gs.clone())
                 }
@@ -542,13 +537,13 @@ pub fn list_devices(json: bool) -> Result<(), String> {
 
 /// 检测安装模式槽位是否失守（CLI 引用规范 5.2 +）。
 fn detect_lost_slot(
-    slots: &[vxapo_driver::install::device::slots::SlotValue; 5],
-    mode: vxapo_driver::install::device::slots::InstallMode,
+    slots: &[vxapo_driver::SlotValue; 5],
+    mode: vxapo_driver::InstallMode,
 ) -> Option<String> {
     let premix = slots[mode.premix_slot().index() as usize];
     let postmix = slots[mode.postmix_slot().index() as usize];
-    let pre_ok = matches!(premix, vxapo_driver::install::device::slots::SlotValue::Guid(g) if g == CLSID_VXAPO_PRE_MIX);
-    let post_ok = matches!(postmix, vxapo_driver::install::device::slots::SlotValue::Guid(g) if g == CLSID_VXAPO_POST_MIX);
+    let pre_ok = matches!(premix, vxapo_driver::SlotValue::Guid(g) if g == CLSID_VXAPO_PRE_MIX);
+    let post_ok = matches!(postmix, vxapo_driver::SlotValue::Guid(g) if g == CLSID_VXAPO_POST_MIX);
     if pre_ok && post_ok {
         None
     } else {
@@ -561,7 +556,7 @@ fn detect_lost_slot(
 /// EAPO 的 CLSID 实证：PreMix={EACD2258-...}、PostMix={EC1CC9CE-...}
 /// （与 knowledge::KNOWN_APO_CLSIDS 一致）。返回 None = 无 EAPO。
 fn detect_eapo_status(
-    slots: &[vxapo_driver::install::device::slots::SlotValue; 5],
+    slots: &[vxapo_driver::SlotValue; 5],
 ) -> Option<String> {
     const EAPO_PRE: &str = "eacd2258-fcac-4ff4-b36d-419e924a6d79";
     const EAPO_POST: &str = "ec1cc9ce-faed-4822-828a-82a81a6f018f";
@@ -571,7 +566,7 @@ fn detect_eapo_status(
     let mut post_slot: Option<&str> = None;
     for (s, val) in slots.iter().enumerate() {
         let normalized = match val {
-            vxapo_driver::install::device::slots::SlotValue::Guid(g) => {
+            vxapo_driver::SlotValue::Guid(g) => {
                 format!("{g:?}").to_lowercase().replace(['{', '}'], "")
             }
             _ => continue,
@@ -637,9 +632,9 @@ pub fn install(
         // 显式 --mode：用户覆盖，不探测。
         Some(m) => {
             config.install_mode = match m.to_lowercase().as_str() {
-                "lfxgfx" => vxapo_driver::install::device::slots::InstallMode::LfxGfx,
-                "sfxmfx" => vxapo_driver::install::device::slots::InstallMode::SfxMfx,
-                "sfxefx" => vxapo_driver::install::device::slots::InstallMode::SfxEfx,
+                "lfxgfx" => vxapo_driver::InstallMode::LfxGfx,
+                "sfxmfx" => vxapo_driver::InstallMode::SfxMfx,
+                "sfxefx" => vxapo_driver::InstallMode::SfxEfx,
                 _ => {
                         if lang() == Lang::En {
                             return Err(format!("Invalid mode: {m} (LfxGfx/SfxMfx/SfxEfx)"));
@@ -652,7 +647,7 @@ pub fn install(
         // 缺省：自动探测（EAPO 三档，driver detect_mode_for_guid）。
         None => {
             config.install_mode =
-                vxapo_driver::install::device::info::detect_mode_for_guid(&dev.guid);
+                vxapo_driver::detect_mode_for_guid(&dev.guid);
             if !json {
                 if lang() == Lang::En {
                     println!("▶ Auto-detected install mode: {:?}", config.install_mode);
@@ -724,7 +719,7 @@ pub fn install(
                 println!("  正在重启音频服务以应用变更…");
             }
         }
-        let _ = vxapo_driver::install::audiodg::restart_audio_service_wait(10, 15);
+        let _ = vxapo_driver::restart_audio_service_wait(10, 15);
 
         ensure_default_config(&dev, json);
         Ok(())
@@ -870,7 +865,7 @@ pub fn stale_migrate(
         }
     }
     // 兜底：确保音频服务处于运行状态（已运行则幂等返回，不重启）。
-    if let Err(e) = vxapo_driver::install::audiodg::ensure_audio_service_running() {
+    if let Err(e) = vxapo_driver::ensure_audio_service_running() {
         eprintln!("⚠ 确保音频服务运行失败：{e}");
     }
     Ok(())
@@ -945,14 +940,14 @@ pub fn uninstall(device_ref: &str, json: bool) -> Result<(), String> {
             println!("  停止音频服务 + 终止 audiodg（卸载前置）…");
         }
     }
-    let _ = vxapo_driver::install::audiodg::stop_audio_service();
+    let _ = vxapo_driver::stop_audio_service();
     let _ = std::process::Command::new("taskkill")
         .args(["/f", "/im", "audiodg.exe"])
         .output();
     // 事件驱动等待：对 audiodg 进程句柄 WaitForSingleObject，进程一退出立即返回
     // （上限 5 s，超时也继续——槽位值的写/删不依赖它，只有"换 DLL 前释放模块映像"依赖）。
     let wait_start = std::time::Instant::now();
-    let exited = vxapo_driver::install::audiodg::wait_for_audiodg_exit(5000);
+    let exited = vxapo_driver::wait_for_audiodg_exit(5000);
     if !json {
         if exited {
             if lang() == Lang::En {
@@ -991,7 +986,7 @@ pub fn uninstall(device_ref: &str, json: bool) -> Result<(), String> {
         .find(|d| d.endpoint.as_ref().map(|e| e.endpoint_guid.eq_ignore_ascii_case(&dev.guid)).unwrap_or(false))
         .map(|d| {
             d.slots.iter().filter(|s| {
-                matches!(s, vxapo_driver::install::device::slots::SlotValue::Guid(g)
+                matches!(s, vxapo_driver::SlotValue::Guid(g)
                     if *g == CLSID_VXAPO_PRE_MIX || *g == CLSID_VXAPO_POST_MIX)
             }).count()
         })
@@ -1399,9 +1394,9 @@ fn capture_snapshot(guid: &str) -> Result<String, String> {
     let mut lines = Vec::new();
     for (i, val) in d.slots.iter().enumerate() {
         let label = match val {
-            vxapo_driver::install::device::slots::SlotValue::Guid(g) => format!("{g:?}"),
-            vxapo_driver::install::device::slots::SlotValue::NoKey => "(NoKey)".to_string(),
-            vxapo_driver::install::device::slots::SlotValue::NoValue => "(NoValue)".to_string(),
+            vxapo_driver::SlotValue::Guid(g) => format!("{g:?}"),
+            vxapo_driver::SlotValue::NoKey => "(NoKey)".to_string(),
+            vxapo_driver::SlotValue::NoValue => "(NoValue)".to_string(),
         };
         lines.push(format!("slot_{i}={label}"));
     }
@@ -1409,7 +1404,7 @@ fn capture_snapshot(guid: &str) -> Result<String, String> {
     let postmix = read_child_apo_guid(guid, ChildApoKind::PostMix).map(|g| format!("{g:?}")).unwrap_or_default();
     lines.push(format!("childPreMix={premix}"));
     lines.push(format!("childPostMix={postmix}"));
-    lines.push(format!("childApoKeyExists={}", vxapo_driver::install::device::slots::child_apo_key_exists(guid)));
+    lines.push(format!("childApoKeyExists={}", vxapo_driver::child_apo_key_exists(guid)));
     Ok(lines.join("\n"))
 }
 
