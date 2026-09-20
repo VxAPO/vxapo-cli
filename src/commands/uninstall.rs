@@ -103,11 +103,12 @@ pub fn uninstall(device_ref: &str, json: bool) -> Result<(), String> {
     // uninstall_endpoint 已定向重启该端点设备并 ensure AudioSrv 运行。
 
     if json {
-        if lang() == Lang::En {
-            println!("{{\"ok\":true,\"device\":\"{}\",\"message\":\"uninstalled\"}}", json_escape(&dev.guid));
+        let message = if lang() == Lang::En {
+            "uninstalled"
         } else {
-            println!("{{\"ok\":true,\"device\":\"{}\",\"message\":\"已卸载\"}}", json_escape(&dev.guid));
-        }
+            "已卸载"
+        };
+        println!("{}", CliOk::new(&dev.guid, message).to_json());
     } else {
         print!("✓ 已卸载 {}。", dev.guid);
         if let Ok(diff) = snapshot_diff(&dev.guid) {

@@ -101,7 +101,7 @@ fn run_subcommand(args: &[String]) -> i32 {
         Ok(()) => 0,
         Err(e) => {
             if json {
-                println!("{{\"ok\":false,\"error\":\"{}\"}}", commands::json_escape(&e));
+                println!("{}", vxapo_protocol::CliError::new(&e).to_json());
             } else {
                 eprintln!("✗ {e}");
             }

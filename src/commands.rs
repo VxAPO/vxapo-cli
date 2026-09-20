@@ -12,29 +12,12 @@ use vxapo_driver::{
     InstallConfig, CLSID_VXAPO_POST_MIX, CLSID_VXAPO_PRE_MIX,
 };
 
+use vxapo_protocol::{CliOk, Device, DeviceKind, DeviceSlots};
+
 use crate::i18n::{Lang, lang, tr};
 use crate::knowledge::KNOWN_APO_CLSIDS;
 use crate::verify::emit_phase;
 
-/// JSON 字符串转义（无依赖手写最小实现）。
-pub(crate) fn json_escape(s: &str) -> String {
-    let mut out = String::with_capacity(s.len() + 8);
-    for c in s.chars() {
-        match c {
-            '"' => out.push_str("\\\""),
-            '\\' => out.push_str("\\\\"),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            c if (c as u32) < 0x20 => {
-                use std::fmt::Write;
-                let _ = write!(out, "\\u{:04x}", c as u32);
-            }
-            c => out.push(c),
-        }
-    }
-    out
-}
 
 /// 设备三元组（resolve_device 产物，CLI 引用规范 4.4.1）。
 pub struct DeviceRef {

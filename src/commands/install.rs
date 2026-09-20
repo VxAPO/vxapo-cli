@@ -132,9 +132,10 @@ pub fn install(
             })?;
         if json {
             println!(
-                "{{\"ok\":true,\"device\":\"{}\",\"mode\":\"{:?}\",\"message\":\"已安装\"}}",
-                json_escape(&dev.guid),
-                config.install_mode
+                "{}",
+                CliOk::new(&dev.guid, "已安装")
+                    .with_mode(format!("{:?}", config.install_mode))
+                    .to_json()
             );
         } else {
             if lang() == Lang::En {
@@ -310,10 +311,7 @@ pub fn stale_cleanup(guid: &str, json: bool) -> Result<(), String> {
     require_admin()?;
     cleanup_orphan(guid).map_err(|e| e.to_string())?;
     if json {
-        println!(
-            "{{\"ok\":true,\"device\":\"{}\",\"message\":\"cleaned\"}}",
-            json_escape(guid)
-        );
+        println!("{}", CliOk::new(guid, "cleaned").to_json());
     } else {
         println!("✓ {} {guid}", tr("已清理", "cleaned"));
     }
@@ -325,10 +323,7 @@ pub fn stale_fix_acl(guid: &str, json: bool) -> Result<(), String> {
     require_admin()?;
     fix_config_acl(guid).map_err(|e| e.to_string())?;
     if json {
-        println!(
-            "{{\"ok\":true,\"device\":\"{}\",\"message\":\"acl-fixed\"}}",
-            json_escape(guid)
-        );
+        println!("{}", CliOk::new(guid, "acl-fixed").to_json());
     } else {
         println!("✓ {guid} ACL fixed");
     }

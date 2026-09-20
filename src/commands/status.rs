@@ -128,7 +128,7 @@ pub fn list_devices(json: bool) -> Result<(), String> {
         }
     })?;
     if json {
-        let mut parts = Vec::new();
+        // 输出契约见 `vxapo_protocol::Device`（App 侧类型由同一 crate 生成，不再手写拼接）。
         let formats: std::collections::HashMap<String, (Option<u32>, Option<u16>, Option<u16>, &'static str)> =
             crate::probe::probe_all()
                 .into_iter()
@@ -141,62 +141,64 @@ pub fn list_devices(json: bool) -> Result<(), String> {
                     (e.guid.to_uppercase(), (e.sample_rate, e.channels, e.bit_depth, kind))
                 })
                 .collect();
+        let mut out: Vec<Device> = Vec::with_capacity(devices.len());
         for (i, d) in devices.iter().enumerate() {
             let ep = d.endpoint.as_ref();
-            let name = ep.map(|e| e.friendly_name.clone()).unwrap_or_else(|| "(未命名)".to_string());
+            let name = ep
+                .map(|e| e.friendly_name.clone())
+                .unwrap_or_else(|| "(未命名)".to_string());
             let guid = ep.map(|e| e.endpoint_guid.clone()).unwrap_or_default();
             let device_id = ep.map(|e| e.device_id.clone()).unwrap_or_default();
-            let (sr, ch, bd, _k) = formats
+            let (sr, ch, bd, kind) = formats
                 .get(&guid.to_uppercase())
                 .cloned()
                 .unwrap_or((None, None, None, "playback"));
-            let sr = sr.map(|v| v.to_string()).unwrap_or_else(|| "null".to_string());
-            let ch = ch.map(|v| v.to_string()).unwrap_or_else(|| "null".to_string());
-            let bd = bd.map(|v| v.to_string()).unwrap_or_else(|| "null".to_string());
-            let kind = match ep.map(|e| e.flow as u8) {
-                Some(1) => "capture",
-                _ => "playback",
-            };
-            let kind = formats
-                .get(&guid.to_uppercase())
-                .map(|(_, _, _, k)| *k)
-                .unwrap_or(kind);
-            let volume = if guid.is_empty() {
-                "null".to_string()
+            // formats 未覆盖时回退到端点流向（1 = capture）。
+            let kind = if kind == "playback" {
+                match ep.map(|e| e.flow as u8) {
+                    Some(1) => "capture",
+                    _ => "playback",
+                }
             } else {
-                endpoint_volume(&guid)
-                    .map(|v| format!("{:.3}", v))
-                    .unwrap_or_else(|| "null".to_string())
+                kind
             };
-            let slots: Vec<String> = d.slots.iter().map(|v| match v {
-                vxapo_driver::SlotValue::Guid(g) => {
+            let mut slot_labels: [Option<String>; 5] = Default::default();
+            for (idx, v) in d.slots.iter().enumerate() {
+                if let vxapo_driver::SlotValue::Guid(g) = v {
                     let gs = format!("{g:?}");
-                    let label = slot_friendly(&gs).unwrap_or_else(|| gs.clone());
-                    format!("\"{}\"", json_escape(&label))
-                }
-                _ => "null".to_string(),
-            }).collect();
-            let mut o = format!(
-                "{{\"index\":{i},\"name\":\"{}\",\"guid\":\"{}\",\"device_id\":\"{}\",\"connection\":\"\",\"installed_version\":\"{}\",\"install_mode\":\"{}\",\"slots\":{{\"LFX\":{},\"GFX\":{},\"SFX\":{},\"MFX\":{},\"EFX\":{}}},\"sample_rate\":{sr},\"channels\":{ch},\"bit_depth\":{bd},\"kind\":\"{kind}\",\"volume\":{volume}",
-                json_escape(&name),
-                json_escape(&guid),
-                json_escape(&device_id),
-                json_escape(&d.installed_version),
-                crate::verify::mode_str(d.install_mode),
-                slots[0], slots[1], slots[2], slots[3], slots[4],
-            );
-            if let Some(eapo) = detect_eapo_status(&d.slots) {
-                o.push_str(&format!(",\"eapo\":\"{}\"", json_escape(&eapo)));
-            }
-            if !guid.is_empty() && child_apo_key_exists(&guid) {
-                if let Some(lost) = detect_lost_slot(&d.slots, d.install_mode) {
-                    o.push_str(&format!(",\"lost_slot\":\"{}\"", json_escape(&lost)));
+                    slot_labels[idx] = Some(slot_friendly(&gs).unwrap_or_else(|| gs.clone()));
                 }
             }
-            o.push('}');
-            parts.push(o);
+            out.push(Device {
+                index: i as u32,
+                name,
+                guid: guid.clone(),
+                device_id,
+                connection: String::new(),
+                installed_version: d.installed_version.clone(),
+                install_mode: crate::verify::mode_str(d.install_mode).to_string(),
+                slots: DeviceSlots::from_slice(slot_labels),
+                sample_rate: sr,
+                channels: ch.map(u32::from),
+                bit_depth: bd.map(u32::from),
+                kind: match kind {
+                    "capture" => DeviceKind::Capture,
+                    _ => DeviceKind::Playback,
+                },
+                volume: if guid.is_empty() {
+                    None
+                } else {
+                    endpoint_volume(&guid)
+                },
+                eapo: detect_eapo_status(&d.slots),
+                lost_slot: if !guid.is_empty() && child_apo_key_exists(&guid) {
+                    detect_lost_slot(&d.slots, d.install_mode)
+                } else {
+                    None
+                },
+            });
         }
-        println!("[{}]", parts.join(","));
+        println!("{}", serde_json::to_string(&out).map_err(|e| e.to_string())?);
         return Ok(());
     }
     if devices.is_empty() {
