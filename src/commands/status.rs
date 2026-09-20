@@ -129,18 +129,9 @@ pub fn list_devices(json: bool) -> Result<(), String> {
     })?;
     if json {
         // 输出契约见 `vxapo_protocol::Device`（App 侧类型由同一 crate 生成，不再手写拼接）。
-        let formats: std::collections::HashMap<String, (Option<u32>, Option<u16>, Option<u16>, &'static str)> =
-            crate::probe::probe_all()
-                .into_iter()
-                .map(|e| {
-                    let kind = if matches!(e.kind, crate::endpoint::EndpointKind::Capture) {
-                        "capture"
-                    } else {
-                        "playback"
-                    };
-                    (e.guid.to_uppercase(), (e.sample_rate, e.channels, e.bit_depth, kind))
-                })
-                .collect();
+        // 格式与流向一律取自 driver 枚举（决策 6）：`DeviceInfo.format` + `EndpointInfo.flow`。
+        // 原实现会另扫一遍 MMDevices 注册表（`probe::probe_all`）再按 GUID 拼回，
+        // 现已删除；两条路径的口径对齐由 driver `format.rs` 的解析单测锁定。
         let mut out: Vec<Device> = Vec::with_capacity(devices.len());
         for (i, d) in devices.iter().enumerate() {
             let ep = d.endpoint.as_ref();
@@ -149,18 +140,10 @@ pub fn list_devices(json: bool) -> Result<(), String> {
                 .unwrap_or_else(|| "(未命名)".to_string());
             let guid = ep.map(|e| e.endpoint_guid.clone()).unwrap_or_default();
             let device_id = ep.map(|e| e.device_id.clone()).unwrap_or_default();
-            let (sr, ch, bd, kind) = formats
-                .get(&guid.to_uppercase())
-                .cloned()
-                .unwrap_or((None, None, None, "playback"));
-            // formats 未覆盖时回退到端点流向（1 = capture）。
-            let kind = if kind == "playback" {
-                match ep.map(|e| e.flow as u8) {
-                    Some(1) => "capture",
-                    _ => "playback",
-                }
-            } else {
-                kind
+            let format = d.format.as_ref();
+            let kind = match ep.map(|e| e.flow) {
+                Some(vxapo_driver::Flow::Capture) => DeviceKind::Capture,
+                _ => DeviceKind::Playback,
             };
             let mut slot_labels: [Option<String>; 5] = Default::default();
             for (idx, v) in d.slots.iter().enumerate() {
@@ -178,13 +161,10 @@ pub fn list_devices(json: bool) -> Result<(), String> {
                 installed_version: d.installed_version.clone(),
                 install_mode: crate::verify::mode_str(d.install_mode).to_string(),
                 slots: DeviceSlots::from_slice(slot_labels),
-                sample_rate: sr,
-                channels: ch.map(u32::from),
-                bit_depth: bd.map(u32::from),
-                kind: match kind {
-                    "capture" => DeviceKind::Capture,
-                    _ => DeviceKind::Playback,
-                },
+                sample_rate: format.map(|f| f.sample_rate),
+                channels: format.map(|f| u32::from(f.channels)),
+                bit_depth: format.map(|f| u32::from(f.bits_per_sample)),
+                kind,
                 volume: if guid.is_empty() {
                     None
                 } else {
