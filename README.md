@@ -1,342 +1,264 @@
 # VxAPO CLI
 
-VxAPO CLI 是 VxAPO 的命令行工具，负责设备管理、配置读写与诊断。它是
-**安装/卸载/注册表操作的唯一入口层**：App（Tauri）后端通过提权子进程调用它完成
-安装、卸载、回滚与验证；CLI 本身把注册表写入收敛到 driver 的统一事务层。
+<!-- 徽章区（待补）：CI 状态 · 许可证 · 最近发布 -->
 
-## 功能与实现
+[中文](#vxapo-cli) · [English](#vxapo-cli-english) · [项目总览](../vxapo-docs/overview/zh/项目概览.md)
 
-### 设备与安装（`src/commands.rs` + driver 的 `install/`）
+VxAPO CLI 是 VxAPO 的命令行工具，负责设备管理、配置读写与诊断。App（Tauri）通过提权子进程
+调用它完成安装、卸载与验证。CLI 把注册表写入交给 driver 的事务层，自己不决定槽位策略。
 
-- 端点枚举与状态：`list` 展示设备序号、名称、GUID、安装模式、槽位占用、EAPO/失守状态、
-  采样率/声道/位深/类型/音量；`--json` 输出供 App/脚本消费。
-- 安装 / 卸载：`install -d <device> [--mode LfxGfx|SfxMfx|SfxEfx] [--no-child]` /
-  `uninstall -d <device>`。安装前自动定位 exe 同级 `vxapo_driver.dll` 并注册 COM
-  CLSID 绑定（新机器无需手动 regsvr32）；注册表写入统一经 driver 事务层。
-- 验证闭环：`install --verify --progress-file` 逐阶段 emit JSON 事件
-  （写配置 / 停服务 / 启服务 / 验证 / 重试 / 完成），App 后端订阅 `install-progress`
-  展示进度；失败时 best 配置保留、可回滚（`rollback` 走卸载）。
+阅读顺序：定位与边界 → 命令一览 → 安装与验证 → 交互模式 → 契约 crate → 与 Driver / App 的
+边界 → 上手 → 测试 → 参考。
 
-### 配置（`src/regdump.rs` / `src/verify.rs` 等）
+## 1 · 定位与边界
 
-- `config show` / `config set -f <toml>`：读写每设备 `C:\ProgramData\VxAPO\{GUID}\config.toml`。
-- `config convert old.txt out.toml`：旧式文本配置转 TOML。
-- 配置模型与 driver 完全一致（`[[effects]]`，见下方“行为对齐”）。
+| CLI 负责 | CLI 不负责 |
+|---|---|
+| 端点枚举与状态展示（`list` / `status`） | 槽位模式的选择与写入策略（driver `install/selector`） |
+| 调用 driver 的安装 / 卸载事务 | 回滚：CLI 没有回滚子命令；App 的 `rollback_install` 失败兜底时改调 `vxapo-cli uninstall` |
+| 配置文件读写与旧格式转换（`config`） | 配置的校验规则（边界由 driver 定义，CLI 只按边界限幅） |
+| 注册表基线快照（`snapshot`） | 实时热重载（driver 侧事件驱动） |
+| 效果器参数表透传（`effects schema`） | 参数范围的维护（来源是 driver 的 `effect_param_specs()`） |
+| 旧 GUID 残留的查询 / 迁移 / 清理（`stale`） | 设备端点的身份判定（以设备实例 ID 为稳定身份） |
 
-### 快照（`src/reg.rs`）
+## 2 · 命令一览
 
-- `snapshot create / diff / restore`：注册表基线快照，用于验证和回滚安装/卸载变更，
-  不触碰配置内容。
+| 命令 | 作用 | 关键选项 / 子命令 | 实现位置 |
+|---|---|---|---|
+| `list` / `status` | 枚举端点 | `--json` 供 App 与脚本消费 | `src/commands/status.rs` |
+| `install -d <device>` | 安装 | `--mode`、`--no-child`、`--verify`、`--progress-file`、`--timeout` | `src/commands/install.rs` |
+| `uninstall -d <device>` | 卸载 | `-d` 或裸 `<device>` 均可 | `src/commands/uninstall.rs` |
+| `register` | 注册 COM CLSID | 使用 exe 同级的 `vxapo_driver.dll` | `src/commands/register.rs` |
+| `config show -d <device>` | 读配置 | 每设备 `C:\ProgramData\VxAPO\{GUID}\config.toml` | `src/commands/convert.rs` |
+| `config set -d <device> -f <file>` | 写配置 | 写回前按 driver 边界限幅 | 同上 |
+| `config convert <old> <out>` | 旧文本配置转 TOML | 一次性迁移 | 同上 |
+| `snapshot create` / `diff` / `restore -d <device>` | 注册表基线 | 只动注册表，不触碰配置内容 | `src/commands/snapshot.rs` |
+| `stale list` / `migrate` / `cleanup` | 旧 GUID 残留 | 以设备实例 ID 匹配活跃端点 | `src/commands/install.rs` |
+| `effects schema [--json]` | 效果器参数表 | App 据此生成 TS 表 | `src/commands/effects.rs` |
+| `help` / 无参数 | 打印帮助 / 进入交互模式 | — | `src/main.rs` |
 
-### 交互模式（`src/app.rs` / `src/i18n.rs`）
+- **`--verify` 不是默认开启**。`install` 的签名是 `verify: bool`（`src/commands/install.rs`）。
+  不传该开关时，`install` 直接调用 driver 的 `install_endpoint`，不跑验证闭环。
+- **CLI 没有 `rollback` 子命令**。回滚是 App 侧兜底：`rollback_install`
+  （`vxapo-app/src-tauri/src/lib.rs`）改调 `vxapo-cli uninstall`。
 
-- 无参数运行进入交互模式：先选语言（English / 中文），再选查看模式（枚举端点/检查槽位）
-  或 Driver 模式（安装/卸载/配置/快照）。
+## 3 · 安装与验证
 
-### 契约 crate（`protocol/`）
+`install --verify` 的执行顺序（`src/commands/install.rs` 与 `src/verify.rs`）：
 
-- 本仓为 cargo workspace，成员 `protocol/` 只依赖 serde + ts-rs，**不依赖 driver**：
-  安装/卸载进度事件（`InstallProgressEvent`，`#[serde(tag = "event")]` 六类 variant）、
-  残留列表（`StaleInstall` / `StaleTargetState` / `StaleMatchedBy`）、迁移报告
-  （`MigrationReport`）都在此定义，App 侧类型由 ts-rs 生成。
-- 进度事件改**类型化发射**（`EventSink::emit` 收 `impl Serialize`），并配**逐字节形状回归测试**
-  锁定与旧手写 JSON 一致；stale 相关 JSON 由 driver 类型经 cli 侧映射，保持 protocol 无 driver 依赖。
-- `effects schema [--json]` 透传 driver 的参数表，供 App 的 `npm run sync:driver-schema` 消费。
+1. `require_admin()`：非管理员直接失败。
+2. `auto_register_driver()`：定位 exe 同级的 `vxapo_driver.dll`，注册 COM CLSID 绑定。
+3. 确保 `config.toml` 存在。缺失时导入默认配置，使验证通过后的状态就是最终可用状态。
+4. 走验证闭环：停服务 → 启服务 → `CoCreateInstance` → `GetMixFormat` → `Initialize` →
+   `test_pipe` 回环。
 
-## 与 Driver / App 的行为对齐
+`--progress-file <path>` 把阶段事件写成 JSON 事件流：`register` / `config` / `verify` 等阶段
+由 `emit_phase` 发出，App 后端订阅后展示进度。
 
-- **安装模型**：APO 槽位模式与子 APO 保留策略由 driver `install/selector` 决定，
-  CLI 只透传参数；App 不直接写注册表，一律经 CLI 提权执行。
-- **配置契约**：`version=1` / `enabled` / `[meta]` / `[[effects]]`；
-  旧类型（maximizer/leveler/auralenhancer/loudnesscorrection）在 driver 解析时兼容，
-  CLI 的 `config convert` 同样按当前模型生成。
-- **限幅**：CLI/App 写回时按 driver 数值边界主动限幅（增益 `[-120,+48]`、31 段上限、
-  NaN/inf 拒绝），driver 只在内存 clamp、不回写。
-- **诊断**：`verify` 复用 driver 的 `test_pipe` / 格式协商，保证“装了就能出声”。
+不带 `--verify` 时，`install` 只调 driver 的 `install_endpoint`。`DisableProtectedAudioDG`、
+槽位与 `ProcessingModes` 写入、安装后重启都由 driver 在该调用内完成，CLI 不重复。
 
-## 设计参考与致谢
+## 4 · 交互模式（`src/tui.rs` / `src/i18n.rs`）
 
-安装模型（逐设备注册 APO 槽位、保留原 APO 为子 APO）与验证流程的设计
-参考了 [Equalizer APO](https://sourceforge.net/projects/equalizerapo/) 的实践；
-本工具为独立实现，不包含 Equalizer APO 代码。Equalizer APO © Jonas Thedering，GPL-2.0。
+无参数运行进入交互模式。程序先询问语言，再询问模式。
 
-## 构建
+| 选择 | 模式 | 内容 |
+|---|---|---|
+| `1` | 查看模式 | 枚举端点，检查槽位 / 格式 / 增强 |
+| `2` | Driver 模式 | 安装 / 卸载 / 配置 / 快照 |
+| `q` | — | 退出 |
 
-```bash
-cargo build --release
-```
+## 5 · 契约 crate（`protocol/`）
 
-## 用法
+本仓是 cargo workspace，成员 `protocol/` 只依赖 serde 与 ts-rs，**不依赖 driver**：
 
-### 交互模式
+- 安装 / 卸载进度事件：`InstallProgressEvent`（`#[serde(tag = "event")]`，六类 variant）。
+- 残留列表：`StaleInstall` / `StaleTargetState` / `StaleMatchedBy`。迁移报告：`MigrationReport`。
+- App 侧类型由 ts-rs 生成，两端因此不各自维护一份。
 
-```bash
-vxapo-cli
-```
+进度事件以类型化方式发射（`EventSink::emit` 接收 `impl Serialize`），并有逐字节形状回归测试
+锁定输出形状。stale 相关 JSON 在 CLI 侧从 driver 类型映射，`protocol` 因此保持无 driver 依赖。
 
-程序会先询问语言：
+## 6 · 与 Driver / App 的边界
 
-```text
-Select language / 选择语言:
-  [1] English
-  [2] 中文
-```
+| 事项 | 决定方 | CLI 的角色 |
+|---|---|---|
+| 安装模式与子 APO 保留策略 | driver `install/selector` | 透传参数 |
+| 数值边界（增益 `[-120,+48]`、段数上限、NaN/inf） | driver | 写回前按边界限幅。driver 只在内存 clamp |
+| 配置模型（`version=1` / `enabled` / `[meta]` / `[[effects]]`） | driver | `config convert` 按当前模型生成 |
+| 旧类型名兼容（`maximizer` / `leveler` / `auralenhancer` / `loudnesscorrection`） | driver 解析时映射 | 不做额外处理 |
+| 注册表写入 | driver 事务层 | 只调用，不自己拼槽位 |
 
-然后可以选择：
+App 不直接写注册表，一律经提权 CLI 执行。
 
-- `1` 查看模式：枚举端点并检查槽位/格式/增强。
-- `2` Driver 模式：安装/卸载/配置/快照操作。
-- `q` 退出。
+## 7 · 快速上手
 
-### 子命令模式
-
-```bash
-vxapo-cli <command> [options]
-```
-
-#### 列出设备
-
-```bash
-vxapo-cli list
-vxapo-cli list --json
-```
-
-显示设备序号、名称、GUID、安装模式、槽位占用、EAPO/失守状态、采样率、声道数、位深、类型和音量。
-
-#### 安装
+前提：Windows 8.1+ 与 Rust（MSVC）工具链。对设备做安装 / 卸载需要管理员权限。
 
 ```bash
-vxapo-cli install -d <device>
-vxapo-cli install -d <device> --mode SfxEfx
-vxapo-cli install -d <device> --mode LfxGfx --no-child
+cargo build --release                      # 产物 vxapo-cli.exe
+
+vxapo-cli list                             # 查设备（序号或 {GUID}）
+vxapo-cli install -d 0 --mode SfxEfx --verify   # 安装并跑验证闭环
+vxapo-cli snapshot diff -d 0               # 核对注册表变更
+vxapo-cli uninstall -d 0
 ```
 
-`<device>` 可以是 `{GUID}` 或 `list` 显示的序号。
-
-- `--mode` 选择 APO 槽位模式：`LfxGfx`、`SfxMfx` 或 `SfxEfx`。
-- `--no-child` 不保留原 APO 作为子 APO。
-- `--verify`（默认）与 `--progress-file`：安装后逐阶段验证，进度以 JSON 事件写出。
-
-#### 卸载
+## 8 · 测试
 
 ```bash
-vxapo-cli uninstall -d <device>
+cargo test        # 22 个测试
 ```
 
-#### 配置
+## 9 · 设计参考与致谢
 
-```bash
-vxapo-cli config show -d <device>
-vxapo-cli config set -d <device> -f ./config.toml
-vxapo-cli config convert old.txt out.toml
-```
+安装模型（逐设备注册 APO 槽位、把原 APO 保留为子 APO）与验证流程参考了
+[Equalizer APO](https://sourceforge.net/projects/equalizerapo/) 的公开实践。本工具是独立实现，
+不含 Equalizer APO 代码。Equalizer APO © Jonas Thedering，GPL-2.0。
 
-#### 快照
+## 文档与许可
 
-```bash
-vxapo-cli snapshot create -d <device>
-vxapo-cli snapshot diff -d <device>
-vxapo-cli snapshot restore -d <device>
-```
-
-快照只保存注册表基线，用于验证和回滚安装/卸载变更。
-
-#### 效果器参数表
-
-```bash
-vxapo-cli effects schema
-vxapo-cli effects schema --json
-```
-
-参数范围/步进与默认值由 driver 的 `effect_param_specs()` 产出，CLI 只透传；App 的
-`npm run sync:driver-schema` 消费 `--json` 生成 `effects.generated.ts`，两端不重复维护。
-
-## 文档
-
-项目文档见 `../vxapo-docs`，详细规范见 `../vxapo-docs/cli` 与 `../vxapo-docs/driver`。
-
-## 许可证
-
-GPL-3.0-or-later
+- 项目文档见 [`../vxapo-docs`](../vxapo-docs)，CLI 规范见 [`../vxapo-docs/cli`](../vxapo-docs/cli)。
+- 许可证：GPL-3.0-or-later。
 
 ---
 
+<a id="vxapo-cli-english"></a>
+
 # VxAPO CLI
 
-VxAPO CLI is the command-line tool for managing VxAPO devices and configuration. It is
-the **single entry point for install/uninstall/registry operations**: the App (Tauri)
-backend invokes it as an elevated subprocess for install, uninstall, rollback, and
-verification; registry writes are funneled through the driver's unified transaction layer.
+<!-- Badges (TODO): CI status · license · latest release -->
 
-## Features & implementation
+[中文](#vxapo-cli) · [English](#vxapo-cli-english) · [Project overview](../vxapo-docs/overview/en/Project%20Overview.md)
 
-### Devices & install (`src/commands.rs` + driver `install/`)
+VxAPO CLI is the command-line tool for VxAPO. It manages devices, reads and writes config,
+and runs diagnostics. The App (Tauri) calls it as an elevated subprocess for install,
+uninstall and verification. The CLI hands registry writes to the driver transaction layer
+and does not choose the slot strategy itself.
 
-- Endpoint enumeration and status: `list` shows index, name, GUID, install mode, slot
-  occupancy, EAPO/lost status, sample rate, channels, bit depth, kind, and volume;
-  `--json` output for the App/scripts.
-- Install / uninstall: `install -d <device> [--mode LfxGfx|SfxMfx|SfxEfx] [--no-child]` /
-  `uninstall -d <device>`. Before installing, the CLI auto-locates `vxapo_driver.dll`
-  next to the executable and registers the COM CLSID binding (no manual regsvr32 on
-  fresh machines); registry writes go through the driver transaction layer.
-- Verification loop: `install --verify --progress-file` emits JSON events per phase
-  (write config / stop service / start service / verify / retry / complete); the App
-  backend subscribes to `install-progress`; on failure the best config is kept and a
-  rollback can run.
+Reading order: scope and boundaries → commands → install and verification → interactive
+mode → contract crate → boundaries with the Driver / App → getting started → tests →
+references.
 
-### Config (`src/regdump.rs` / `src/verify.rs`)
+## 1 · Scope and boundaries
 
-- `config show` / `config set -f <toml>`: read/write per-device
-  `C:\ProgramData\VxAPO\{GUID}\config.toml`.
-- `config convert old.txt out.toml`: legacy text config → TOML.
-- The config model matches the driver exactly (`[[effects]]`, see "Alignment" below).
+| The CLI owns | The CLI does not own |
+|---|---|
+| Endpoint enumeration and status output (`list` / `status`) | Slot mode selection and the write strategy (driver `install/selector`) |
+| Calls to the driver install / uninstall transaction | Rollback. The CLI has no rollback command. The App's `rollback_install` fallback calls `vxapo-cli uninstall` instead |
+| Config read/write and legacy format conversion (`config`) | Config validation rules. The driver defines the bounds, and the CLI only clamps to them |
+| Registry baseline snapshots (`snapshot`) | Hot reload. The driver watches file events |
+| Relaying the effect parameter table (`effects schema`) | Parameter range maintenance. The ranges come from the driver's `effect_param_specs()` |
+| Query, migration and cleanup of stale GUIDs (`stale`) | Endpoint identity. The driver matches on the device instance ID |
 
-### Snapshot (`src/reg.rs`)
+## 2 · Commands
 
-- `snapshot create / diff / restore`: registry-only baselines used to verify and roll
-  back install/uninstall changes; never touches config content.
+| Command | Purpose | Key options / subcommands | Where implemented |
+|---|---|---|---|
+| `list` / `status` | Enumerate endpoints | `--json` for the App and scripts | `src/commands/status.rs` |
+| `install -d <device>` | Install | `--mode`, `--no-child`, `--verify`, `--progress-file`, `--timeout` | `src/commands/install.rs` |
+| `uninstall -d <device>` | Uninstall | `-d` and a bare `<device>` both work | `src/commands/uninstall.rs` |
+| `register` | Register the COM CLSID | Uses `vxapo_driver.dll` next to the executable | `src/commands/register.rs` |
+| `config show -d <device>` | Read config | Per device `C:\ProgramData\VxAPO\{GUID}\config.toml` | `src/commands/convert.rs` |
+| `config set -d <device> -f <file>` | Write config | Clamps to driver bounds before writing | same |
+| `config convert <old> <out>` | Legacy text config to TOML | One-time migration | same |
+| `snapshot create` / `diff` / `restore -d <device>` | Registry baseline | Touches the registry only, never config content | `src/commands/snapshot.rs` |
+| `stale list` / `migrate` / `cleanup` | Stale GUID records | Matches active endpoints by device instance ID | `src/commands/install.rs` |
+| `effects schema [--json]` | Effect parameter table | The App generates its TS table from this | `src/commands/effects.rs` |
+| `help` / no arguments | Print help / enter interactive mode | — | `src/main.rs` |
 
-### Interactive mode (`src/app.rs` / `src/i18n.rs`)
+- **`--verify` is not the default.** The `install` signature takes `verify: bool`
+  (`src/commands/install.rs`). Without the flag, `install` calls the driver's
+  `install_endpoint` directly and runs no verification loop.
+- **The CLI has no `rollback` subcommand.** Rollback is an App-side fallback:
+  `rollback_install` (`vxapo-app/src-tauri/src/lib.rs`) calls `vxapo-cli uninstall`.
 
-- Run without arguments to enter interactive mode: choose a language
-  (English / 中文), then Viewer mode (enumerate endpoints / inspect slots) or
-  Driver mode (install/uninstall/config/snapshot).
+## 3 · Install and verification
 
-### Contract crate (`protocol/`)
+`install --verify` runs these steps in order (`src/commands/install.rs`, `src/verify.rs`):
 
-- This repo is a cargo workspace; the `protocol/` member depends only on serde + ts-rs and
-  **never on the driver**: install/uninstall progress events (`InstallProgressEvent`, six
-  variants tagged by `event`), stale installs (`StaleInstall` / `StaleTargetState` /
-  `StaleMatchedBy`) and the migration report (`MigrationReport`) live here, with the app's
-  types generated by ts-rs.
-- Progress events are emitted as typed values (`EventSink::emit` takes `impl Serialize`) and
-  pinned by **byte-exact shape regression tests** against the previous hand-written JSON.
-  Stale-related JSON is mapped from driver types on the CLI side to keep `protocol`
-  driver-free.
-- `effects schema [--json]` passes the driver's parameter table through for the app's
-  `npm run sync:driver-schema`.
+1. `require_admin()` fails the run when the process is not elevated.
+2. `auto_register_driver()` locates `vxapo_driver.dll` next to the executable and registers
+   the COM CLSID binding.
+3. The CLI makes sure `config.toml` exists. When it is missing, the CLI imports the default
+   config, so a passing verification leaves the device in its final usable state.
+4. The verification loop runs: stop service → start service → `CoCreateInstance` →
+   `GetMixFormat` → `Initialize` → `test_pipe` round trip.
 
-## Alignment with the Driver / App
+`--progress-file <path>` writes the phase events as a JSON stream. `emit_phase` emits phases
+such as `register`, `config` and `verify`. The App backend subscribes and shows progress.
 
-- **Install model**: APO slot modes and the child-APO preservation policy are decided
-  by the driver `install/selector`; the CLI only passes parameters. The App never
-  writes the registry directly — it always goes through the elevated CLI.
-- **Config contract**: `version=1` / `enabled` / `[meta]` / `[[effects]]`; legacy type
-  names (`maximizer`/`leveler`/`auralenhancer`/`loudnesscorrection`) are compatible at
-  driver parse time, and `config convert` generates the current model.
-- **Clamping**: write-side clamping follows driver bounds (gain `[-120,+48]`, 31-band
-  limit, NaN/inf rejected); the driver only clamps in memory and never writes back.
-- **Diagnostics**: `verify` reuses the driver's `test_pipe` / format negotiation to
-  guarantee "installed = working".
+Without `--verify`, `install` calls only the driver's `install_endpoint`. That call handles
+`DisableProtectedAudioDG`, the slot and `ProcessingModes` writes, and the post-install
+restart. The CLI does not repeat any of it.
 
-## Design references & acknowledgments
+## 4 · Interactive mode (`src/tui.rs` / `src/i18n.rs`)
 
-The install model (per-device APO slot registration, preserving the original APO as a
-child) and the verification workflow are inspired by
-[Equalizer APO](https://sourceforge.net/projects/equalizerapo/); this tool is an
-independent implementation with no Equalizer APO code. Equalizer APO © Jonas Thedering,
-GPL-2.0.
+Run the tool with no arguments to enter interactive mode. It asks for a language first, then
+for a mode.
 
-## Build
+| Choice | Mode | Contents |
+|---|---|---|
+| `1` | Viewer | Enumerate endpoints and inspect slots, formats and enhancements |
+| `2` | Driver | Install, uninstall, config and snapshot operations |
+| `q` | — | Quit |
 
-```bash
-cargo build --release
-```
+## 5 · Contract crate (`protocol/`)
 
-## Usage
+This repository is a cargo workspace. The `protocol/` member depends on serde and ts-rs only,
+and **never on the driver**:
 
-### Interactive mode
+- Install and uninstall progress events: `InstallProgressEvent`, with six variants tagged by
+  `event`.
+- Stale records: `StaleInstall` / `StaleTargetState` / `StaleMatchedBy`. Migration report:
+  `MigrationReport`.
+- ts-rs generates the App-side types, so the two sides do not maintain separate copies.
 
-```bash
-vxapo-cli
-```
+The CLI emits progress events as typed values (`EventSink::emit` takes `impl Serialize`), and
+byte-exact shape regression tests pin the output. The CLI maps stale JSON from driver types,
+which keeps `protocol` free of driver dependencies.
 
-The program first asks you to select a language:
+## 6 · Boundaries with the Driver and App
 
-```text
-Select language / 选择语言:
-  [1] English
-  [2] 中文
-```
+| Item | Decided by | The CLI's role |
+|---|---|---|
+| Install mode and child-APO preservation policy | driver `install/selector` | Passes parameters through |
+| Numeric bounds (gain `[-120,+48]`, band-count limit, NaN/inf) | driver | Clamps on write. The driver clamps in memory only |
+| Config model (`version=1` / `enabled` / `[meta]` / `[[effects]]`) | driver | `config convert` generates the current model |
+| Legacy type names (`maximizer` / `leveler` / `auralenhancer` / `loudnesscorrection`) | driver parse time | No extra handling |
+| Registry writes | driver transaction layer | Calls into it and never assembles slots itself |
 
-Then you can choose:
+The App never writes the registry directly. It always goes through the elevated CLI.
 
-- `1` Viewer mode: enumerate endpoints and inspect slots/formats/enhancements.
-- `2` Driver mode: install/uninstall/config/snapshot operations.
-- `q` Quit.
+## 7 · Getting started
 
-### Subcommand mode
-
-```bash
-vxapo-cli <command> [options]
-```
-
-#### List devices
+Prerequisites: Windows 8.1+ and a Rust (MSVC) toolchain. Device install and uninstall need
+administrator rights.
 
 ```bash
-vxapo-cli list
-vxapo-cli list --json
+cargo build --release                      # produces vxapo-cli.exe
+
+vxapo-cli list                             # list devices (index or {GUID})
+vxapo-cli install -d 0 --mode SfxEfx --verify   # install and verify
+vxapo-cli snapshot diff -d 0               # inspect registry changes
+vxapo-cli uninstall -d 0
 ```
 
-Shows device index, name, GUID, install mode, slot occupancy, EAPO/lost status, sample
-rate, channels, bit depth, kind, and volume.
-
-#### Install
+## 8 · Tests
 
 ```bash
-vxapo-cli install -d <device>
-vxapo-cli install -d <device> --mode SfxEfx
-vxapo-cli install -d <device> --mode LfxGfx --no-child
+cargo test        # 22 tests
 ```
 
-`<device>` can be a `{GUID}` or the index shown by `list`.
+## 9 · Design references and acknowledgments
 
-- `--mode` selects the APO slot mode: `LfxGfx`, `SfxMfx`, or `SfxEfx`.
-- `--no-child` disables preserving the original APO as a child APO.
-- `--verify` (default) with `--progress-file`: phase-by-phase verification, progress
-  written as JSON events.
+The install model (per-device APO slot registration, keeping the original APO as a child)
+and the verification workflow reference the public practice of
+[Equalizer APO](https://sourceforge.net/projects/equalizerapo/). This tool is an independent
+implementation and contains no Equalizer APO code. Equalizer APO © Jonas Thedering, GPL-2.0.
 
-#### Uninstall
+## Documentation and license
 
-```bash
-vxapo-cli uninstall -d <device>
-```
-
-#### Config
-
-```bash
-vxapo-cli config show -d <device>
-vxapo-cli config set -d <device> -f ./config.toml
-vxapo-cli config convert old.txt out.toml
-```
-
-#### Snapshot
-
-```bash
-vxapo-cli snapshot create -d <device>
-vxapo-cli snapshot diff -d <device>
-vxapo-cli snapshot restore -d <device>
-```
-
-Snapshots are registry-only baselines used to verify and roll back install/uninstall
-changes.
-
-#### Effect parameter schema
-
-```bash
-vxapo-cli effects schema
-vxapo-cli effects schema --json
-```
-
-Ranges/steps/defaults come from the driver's `effect_param_specs()`; the CLI only relays
-them. The App's `npm run sync:driver-schema` consumes `--json` to generate
-`effects.generated.ts`, so both sides share a single source of truth.
-
-## Documentation
-
-See `../vxapo-docs`; detailed references under `../vxapo-docs/cli` and
-`../vxapo-docs/driver`.
-
-## License
-
-GPL-3.0-or-later
+- Project documentation: [`../vxapo-docs`](../vxapo-docs). CLI reference:
+  [`../vxapo-docs/cli`](../vxapo-docs/cli).
+- License: GPL-3.0-or-later.
