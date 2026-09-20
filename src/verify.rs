@@ -15,6 +15,8 @@ use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use serde_json::json;
+
+use vxapo_protocol::{InstallProgressEvent, ServiceAction};
 use vxapo_driver::{
     find_endpoint_path, read_child_apo_guid, write_install_config, ChildApoKind, InstallConfig,
     InstallMode, RegKey,
@@ -61,8 +63,11 @@ impl<'a> EventSink<'a> {
         Self { progress_file }
     }
 
-    pub(crate) fn emit(&mut self, event: serde_json::Value) {
-        let line = event.to_string();
+    /// 发送进度事件（stdout + progress 文件各一行）。事件类型见 `vxapo_protocol`；
+    /// 诊断用的 `trace` 事件直接传 `json!` 值。
+    pub(crate) fn emit(&mut self, event: impl serde::Serialize) {
+        let line = serde_json::to_string(&event)
+            .unwrap_or_else(|e| format!(r#"{{"event":"error","error":"{e}"}}"#));
         println!("{line}");
         if let Some(p) = self.progress_file {
             if let Ok(mut f) = OpenOptions::new().create(true).append(true).open(p) {
@@ -75,7 +80,10 @@ impl<'a> EventSink<'a> {
 
 /// 阶段进度事件（pre-verify 步骤也上报，便于定位卡点；仅在有 progress 文件时输出）。
 pub(crate) fn emit_phase(progress_file: Option<&Path>, name: &str) {
-    let line = json!({"event": "phase", "name": name}).to_string();
+    let line = serde_json::to_string(&InstallProgressEvent::Phase {
+        name: name.to_string(),
+    })
+    .unwrap_or_else(|e| format!(r#"{{"event":"error","error":"{e}"}}"#));
     println!("{line}");
     if let Some(p) = progress_file {
         if let Ok(mut f) = OpenOptions::new().create(true).append(true).open(p) {
@@ -196,21 +204,21 @@ pub(crate) fn install_verify(
         let mode_name = mode_str(*mode);
 
         // 1. 纯注册表写入（覆盖安装天然安全，无需先 uninstall）。
-        sink.emit(json!({"event": "install_write", "mode": mode_name}));
+        sink.emit(InstallProgressEvent::InstallWrite { mode: mode_name.to_string() });
         write_install_config(&dev.guid, &dev.name, &dev.connection, &mode_config)
             .map_err(|e| format!("写入安装配置失败：{e}"))?;
 
         // 2. 停 AudioSrv（含依赖服务）。
-        sink.emit(json!({"event": "service", "action": "stopping"}));
+        sink.emit(InstallProgressEvent::Service { action: ServiceAction::Stopping });
         vxapo_driver::stop_audio_service_with_dependents(STOP_TIMEOUT_SECS)
             .map_err(|e| format!("停止音频服务失败：{e}"))?;
-        sink.emit(json!({"event": "service", "action": "stopped"}));
+        sink.emit(InstallProgressEvent::Service { action: ServiceAction::Stopped });
 
         // 3. 启动 AudioSrv（含依赖服务，轮询 RUNNING）。
-        sink.emit(json!({"event": "service", "action": "starting"}));
+        sink.emit(InstallProgressEvent::Service { action: ServiceAction::Starting });
         vxapo_driver::start_audio_service_with_dependents(START_TIMEOUT_SECS)
             .map_err(|e| format!("启动音频服务失败：{e}"))?;
-        sink.emit(json!({"event": "service", "action": "running"}));
+        sink.emit(InstallProgressEvent::Service { action: ServiceAction::Running });
         // SCM 报 RUNNING 不代表音频引擎已就绪：先静默等待，避免后续
         // IMMDevice/IAudioClient 激活在引擎启动窗口内无限期阻塞。
         std::thread::sleep(Duration::from_millis(POST_SERVICE_SETTLE_MS));
@@ -230,24 +238,29 @@ pub(crate) fn install_verify(
         // 5. 计分与事件。
         let score = score_of(&report, is_capture, expected_premix, expected_postmix);
         // 用户端只接收 mode；计分仅内部用于模式重试与 complete 事件。
-        sink.emit(json!({"event": "test", "mode": mode_name}));
+        sink.emit(InstallProgressEvent::Test { mode: mode_name.to_string(), pipe: None });
         if score > best_score {
             best_score = score;
             best_mode = Some(*mode);
         }
 
         if score == max_score {
-            sink.emit(json!({
-                "event": "complete", "success": true, "mode": mode_name,
-                "score": score, "attempts": attempts,
-            }));
+            sink.emit(InstallProgressEvent::Complete {
+                success: true,
+                mode: Some(mode_name.to_string()),
+                score: Some(score),
+                attempts,
+                best_mode: None,
+                best_score: None,
+            });
             return Ok(());
         }
         if let Some(next) = modes.get(idx + 1) {
-            sink.emit(json!({
-                "event": "retry", "from": mode_name, "to": mode_str(*next),
-                "reason": format!("score {score} < {max_score}"),
-            }));
+            sink.emit(InstallProgressEvent::Retry {
+                from: mode_name.to_string(),
+                to: mode_str(*next).to_string(),
+                reason: Some(format!("score {score} < {max_score}")),
+            });
         }
     }
 
@@ -255,11 +268,14 @@ pub(crate) fn install_verify(
     // 设备不残留"已安装"状态；确保音频服务运行后报告失败。
     let _ = vxapo_driver::uninstall_endpoint(&dev.guid);
     let _ = vxapo_driver::start_audio_service_with_dependents(START_TIMEOUT_SECS);
-    sink.emit(json!({
-        "event": "complete", "success": false,
-        "best_mode": best_mode.map(mode_str),
-        "best_score": best_score, "attempts": attempts,
-    }));
+    sink.emit(InstallProgressEvent::Complete {
+        success: false,
+        mode: None,
+        score: None,
+        attempts,
+        best_mode: best_mode.map(|m| mode_str(m).to_string()),
+        best_score: Some(best_score),
+    });
     Err(tr(
         "所有安装模式均未通过验证",
         "All install modes failed verification",
@@ -283,7 +299,7 @@ fn run_pipe_verify(
     let handles = create_pipe_servers(&full_path, PIPE_INSTANCES)?;
 
     write_test_pipe_name(PIPE_NAME)?;
-    sink.emit(json!({"event": "test", "pipe": PIPE_NAME, "mode": mode_name}));
+    sink.emit(InstallProgressEvent::Test { mode: mode_name.to_string(), pipe: Some(PIPE_NAME.to_string()) });
 
     // 服务端线程：接受多个客户端连接（每个 APO 实例连一次、发一行即关），
     // 消息经 channel 送回主线程。

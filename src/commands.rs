@@ -12,7 +12,10 @@ use vxapo_driver::{
     InstallConfig, CLSID_VXAPO_POST_MIX, CLSID_VXAPO_PRE_MIX,
 };
 
-use vxapo_protocol::{CliOk, Device, DeviceKind, DeviceSlots};
+use vxapo_protocol::{
+    CliOk, Device, DeviceKind, DeviceSlots, MigrationReport, StaleInstall, StaleMatchedBy,
+    StaleTargetState,
+};
 
 use crate::i18n::{Lang, lang, tr};
 use crate::knowledge::KNOWN_APO_CLSIDS;

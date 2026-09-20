@@ -228,9 +228,11 @@ pub(super) fn ensure_default_config(dev: &DeviceRef, json: bool) {
 pub fn stale_list(json: bool) -> Result<(), String> {
     let list = list_stale_installs().map_err(|e| e.to_string())?;
     if json {
+        // 对外契约类型（protocol）：映射集中在 cli 侧，protocol 不依赖 driver。
+        let contract: Vec<StaleInstall> = list.iter().map(contract_stale).collect();
         println!(
             "{}",
-            serde_json::to_string(&list).map_err(|e| e.to_string())?
+            serde_json::to_string(&contract).map_err(|e| e.to_string())?
         );
         return Ok(());
     }
@@ -284,7 +286,7 @@ pub fn stale_migrate(
     if json {
         println!(
             "{}",
-            serde_json::to_string(&report).map_err(|e| e.to_string())?
+            serde_json::to_string(&contract_report(&report)).map_err(|e| e.to_string())?
         );
     } else {
         println!(
@@ -330,3 +332,56 @@ pub fn stale_fix_acl(guid: &str, json: bool) -> Result<(), String> {
     Ok(())
 }
 
+// ── driver 类型 → 对外契约类型（映射集中在此，protocol 不依赖 driver）──────────
+//
+// 说明：`matched_by` / `target_state` 在 driver 侧是 `String`（便于内部演进），
+// 到契约层收敛为枚举，未知取值按最保守分支处理（见下方注释）。
+
+/// driver 残留记录 → `vxapo_protocol::StaleInstall`。
+fn contract_stale(s: &vxapo_driver::StaleInstall) -> StaleInstall {
+    StaleInstall {
+        guid: s.guid.clone(),
+        device_instance_id: s.device_instance_id.clone(),
+        display_name: s.display_name.clone(),
+        matched_by: s.matched_by.as_deref().map(|m| match m {
+            "endpoint_history" => StaleMatchedBy::EndpointHistory,
+            "device_instance_id" => StaleMatchedBy::DeviceInstanceId,
+            "stored_identity" => StaleMatchedBy::StoredIdentity,
+            "hardware_id" => StaleMatchedBy::HardwareId,
+            // 未知来源（driver 新增）→ 硬件 ID 兜底：语义上同属「间接命中」。
+            _ => StaleMatchedBy::HardwareId,
+        }),
+        config_path: s.config_path.clone(),
+        config_mtime_ms: s.config_mtime_ms,
+        snapshot_path: s.snapshot_path.clone(),
+        snapshot_mtime_ms: s.snapshot_mtime_ms,
+        premix_slot: s.premix_slot.clone(),
+        postmix_slot: s.postmix_slot.clone(),
+        inferred_mode: s.inferred_mode.clone(),
+        has_child_backup: s.has_child_backup,
+        has_sysfx_backup: s.has_sysfx_backup,
+        target_guid: s.target_guid.clone(),
+        target_name: s.target_name.clone(),
+        target_state: match s.target_state.as_str() {
+            "matched_partial" => StaleTargetState::MatchedPartial,
+            "matched_healthy" => StaleTargetState::MatchedHealthy,
+            // 未知状态 → unmatched（最保守：只给清理出口，不提示迁移）。
+            _ => StaleTargetState::Unmatched,
+        },
+    }
+}
+
+/// driver 迁移报告 → `vxapo_protocol::MigrationReport`。
+fn contract_report(r: &vxapo_driver::MigrationReport) -> MigrationReport {
+    MigrationReport {
+        success: r.success,
+        target_guid: r.target_guid.clone(),
+        config_from: r.config_from.clone(),
+        snapshot_from: r.snapshot_from.clone(),
+        config_migrated: r.config_migrated,
+        snapshot_migrated: r.snapshot_migrated,
+        install_repaired: r.install_repaired,
+        removed_guids: r.removed_guids.clone(),
+        warnings: r.warnings.clone(),
+    }
+}
