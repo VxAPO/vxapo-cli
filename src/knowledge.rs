@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 use std::sync::LazyLock;
 
+use vxapo_driver::{guid_to_string, CLSID_VXAPO_POST_MIX, CLSID_VXAPO_PRE_MIX};
+
 pub struct PropertyMeta {
     pub name: &'static str,
     pub description: &'static str,
@@ -37,12 +39,28 @@ pub static KNOWN_PROPERTIES: LazyLock<HashMap<&'static str, PropertyMeta>> = Laz
 });
 
 /// APO CLSID → 友好名映射（CLI 引用规范 4.5：EAPO/VxAPO pre/postmix 实读源码确认）。
-pub static KNOWN_APO_CLSIDS: LazyLock<HashMap<&'static str, &'static str>> = LazyLock::new(|| {
+///
+/// key 为 `{xxxxxxxx-...}` 小写带花括号（与 `slot_friendly` 的规范化输入一致）。
+/// VxAPO 两个 key 由 driver 常量生成，避免字面量再次漂移；EAPO 的 CLSID 不属 VxAPO，
+/// 仍以实读值记录。
+pub static KNOWN_APO_CLSIDS: LazyLock<HashMap<String, &'static str>> = LazyLock::new(|| {
     let mut m = HashMap::new();
-    m.insert("{eacd2258-fcac-4ff4-b36d-419e924a6d79}", "Equalizer APO PreMix");
-    m.insert("{ec1cc9ce-faed-4822-828a-82a81a6f018f}", "Equalizer APO PostMix");
-    m.insert("{41c34613-d391-459d-a039-72b2b15a1a1d}", "VxAPO PreMix");
-    m.insert("{b4a97313-abc0-45ed-9c33-428b20d39428}", "VxAPO PostMix");
+    m.insert(
+        "{eacd2258-fcac-4ff4-b36d-419e924a6d79}".to_string(),
+        "Equalizer APO PreMix",
+    );
+    m.insert(
+        "{ec1cc9ce-faed-4822-828a-82a81a6f018f}".to_string(),
+        "Equalizer APO PostMix",
+    );
+    m.insert(
+        guid_to_string(&CLSID_VXAPO_PRE_MIX).to_lowercase(),
+        "VxAPO PreMix",
+    );
+    m.insert(
+        guid_to_string(&CLSID_VXAPO_POST_MIX).to_lowercase(),
+        "VxAPO PostMix",
+    );
     m
 });
 

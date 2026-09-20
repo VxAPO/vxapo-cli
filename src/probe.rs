@@ -133,3 +133,19 @@ fn probe_path(base: &str, ep_kind: EndpointKind, out: &mut Vec<Endpoint>, idx: &
         *idx += 1;
     }
 }
+
+
+/// 交互模式的应用状态：端点列表；`refresh` 重新探测。
+pub struct App {
+    pub endpoints: Vec<Endpoint>,
+}
+
+impl App {
+    pub fn new() -> Self {
+        App { endpoints: Vec::new() }
+    }
+
+    pub fn refresh(&mut self) {
+        self.endpoints = probe_all();
+    }
+}
