@@ -810,7 +810,15 @@ pub fn stale_list(json: bool) -> Result<(), String> {
     }
     for item in list {
         println!("{}  {}", item.guid, item.target_state);
-        println!("     device: {}", item.device_instance_id);
+        println!(
+            "     device: {}  matched_by: {}",
+            if item.device_instance_id.is_empty() {
+                "-"
+            } else {
+                item.device_instance_id.as_str()
+            },
+            item.matched_by.clone().unwrap_or_else(|| "-".to_string())
+        );
         if let Some(target) = item.target_guid {
             println!(
                 "     target: {}  {}",
@@ -837,22 +845,12 @@ pub fn stale_migrate(
     json: bool,
 ) -> Result<(), String> {
     require_admin()?;
-    // 与 install/uninstall 一致：先停音频服务并结束残留 audiodg，
-    // 避免端点槽位/信息区在迁移写入时被占用。
-    let _ = vxapo_driver::install::audiodg::stop_audio_service();
-    let _ = std::process::Command::new("taskkill")
-        .args(["/f", "/im", "audiodg.exe"])
-        .output();
-    std::thread::sleep(std::time::Duration::from_millis(1500));
-    let report = match migrate_install(from, to, config_from, snapshot_from) {
-        Ok(report) => report,
-        Err(e) => {
-            let _ = std::process::Command::new("net")
-                .args(["start", "audiosrv"])
-                .output();
-            return Err(e.to_string());
-        }
-    };
+    // **不停服**（2026-09-16 实测结论）：写/删端点 FxProperties 值只需要句柄具备
+    // KEY_SET_VALUE（`RegKey::open_for_write` 即是），与 audiodg 是否持有点端无关——
+    // 在活动音频流上删除槽位值同样成功。因此这里既不 stop AudioSrv 也不 taskkill
+    // audiodg。修复分支若真的改写了槽位，由 driver 在写完后**重启端点**让变更生效
+    // （引擎会缓存端点 APO 链，只改注册表不会立刻重载）。
+    let report = migrate_install(from, to, config_from, snapshot_from).map_err(|e| e.to_string())?;
     if json {
         println!(
             "{}",
@@ -870,6 +868,10 @@ pub fn stale_migrate(
                 eprintln!("⚠ {w}");
             }
         }
+    }
+    // 兜底：确保音频服务处于运行状态（已运行则幂等返回，不重启）。
+    if let Err(e) = vxapo_driver::install::audiodg::ensure_audio_service_running() {
+        eprintln!("⚠ 确保音频服务运行失败：{e}");
     }
     Ok(())
 }
@@ -926,9 +928,16 @@ pub fn uninstall(device_ref: &str, json: bool) -> Result<(), String> {
             return Err("无基线可对比——快照不存在（先 install 建立基线）".to_string());
         }
     }
-    // 卸载前确保 audiodg 进程退出：audiodg 持有点端会**锁 MMDevices 槽位键句柄**，
-    // 先经 driver SCM 停服务（30s 超时，不会挂死）+ taskkill 兜底杀残留 audiodg，
-    // 保证槽位值可删（改用 SCM 替代 net stop——后者在服务未跑时可能挂起）。
+    // 卸载前先让 audiodg 退出：**不是为了"能删槽位值"**（写/删 FxProperties 值只需
+    // KEY_SET_VALUE 句柄，2026-09-16 实测：音频播放中、DLL 已被 audiodg 加载、
+    // audiodg 持有点端的情况下，槽位值照样删成功）。真正的理由是：
+    // ① 释放模块映像——taskkill 后 audiodg 才会卸载 vxapo_driver.dll，
+    //    否则紧随其后的重装/换 DLL 会因文件被占用而覆盖失败（NSIS 的
+    //    installer-hooks.nsh 同样为此在安装/卸载前停服务）；
+    // ② 让端点图重建（pnputil /restart-device）立刻生效——引擎会缓存端点 APO 链，
+    //    只改注册表的话新起的流仍加载旧 APO。
+    // 走 driver SCM 停服务（30s 超时，不会挂死）+ taskkill 兜底杀残留 audiodg
+    // （改用 SCM 替代 net stop——后者在服务未跑时可能挂起）。
     if !json {
         if lang() == Lang::En {
             println!("  Stopping audio service + terminating audiodg (uninstall prerequisite)...");
@@ -940,9 +949,25 @@ pub fn uninstall(device_ref: &str, json: bool) -> Result<(), String> {
     let _ = std::process::Command::new("taskkill")
         .args(["/f", "/im", "audiodg.exe"])
         .output();
-    std::thread::sleep(std::time::Duration::from_millis(1500));
+    // 事件驱动等待：对 audiodg 进程句柄 WaitForSingleObject，进程一退出立即返回
+    // （上限 5 s，超时也继续——槽位值的写/删不依赖它，只有"换 DLL 前释放模块映像"依赖）。
+    let wait_start = std::time::Instant::now();
+    let exited = vxapo_driver::install::audiodg::wait_for_audiodg_exit(5000);
+    if !json {
+        if exited {
+            if lang() == Lang::En {
+                println!("  audiodg exited ({} ms)", wait_start.elapsed().as_millis());
+            } else {
+                println!("  audiodg 已退出（{} ms）", wait_start.elapsed().as_millis());
+            }
+        } else if lang() == Lang::En {
+            println!("  ⚠ timed out waiting for audiodg exit (5 s); continuing (slot edit unaffected)");
+        } else {
+            println!("  ⚠ 等待 audiodg 退出超时（5 s），继续执行（槽位写入不受影响）");
+        }
+    }
 
-    // 卸载（audiodg 已退出 → 槽位值删除不被锁）。
+    // 卸载（audiodg 已退出；uninstall_endpoint 内部还会再停一次服务并重启端点）。
     if let Err(e) = uninstall_endpoint(&dev.guid) {
         // 卸载失败也要尝试恢复音频服务。
         let _ = std::process::Command::new("net").args(["start", "audiosrv"]).output();
