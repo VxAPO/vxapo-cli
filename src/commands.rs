@@ -376,7 +376,7 @@ pub fn show_device_status(device_ref: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// 查询端点主音量（0.0–1.0， 新增；失败返回 None）。
+/// 查询端点主音量（0.0–1.0；失败返回 None）。
 fn endpoint_volume(guid: &str) -> Option<f32> {
     use windows::Win32::Media::Audio::{
         EDataFlow, IMMDeviceEnumerator, MMDeviceEnumerator, DEVICE_STATE_ACTIVE,
@@ -665,7 +665,7 @@ pub fn install(
     config.use_original_apo_premix = !no_child;
     config.use_original_apo_postmix = !no_child;
 
-    // 快照基线（安装前建立/替换，Phase C——只注册表，config 不属 CLI 快照）。
+    // 快照基线（安装前建立/替换；只注册表，config 不属 CLI 快照）。
     emit_phase(progress_file, "snapshot");
     if let Err(e) = snapshot_device(&dev.guid, true) {
         if !json {
@@ -731,7 +731,7 @@ pub fn install(
     }
 }
 
-/// per-device config.toml 检查（方案 A）：缺失时自动从 exe 同级 `.\config.toml` 导入，
+/// per-device config.toml 检查：缺失时自动从 exe 同级 `.\config.toml` 导入，
 /// 避免「装完发现没配置」。约定：把 config.toml 放在 vxapo-cli.exe 同目录即可，
 /// 安装自动复制到 C:\ProgramData\VxAPO\{guid}\config.toml 供 APO 解析。
 fn ensure_default_config(dev: &DeviceRef, json: bool) {
@@ -845,10 +845,10 @@ pub fn stale_migrate(
     json: bool,
 ) -> Result<(), String> {
     require_admin()?;
-    // **不停服**（2026-09-16 实测结论）：写/删端点 FxProperties 值只需要句柄具备
-    // KEY_SET_VALUE（`RegKey::open_for_write` 即是），与 audiodg 是否持有点端无关——
-    // 在活动音频流上删除槽位值同样成功。因此这里既不 stop AudioSrv 也不 taskkill
-    // audiodg。修复分支若真的改写了槽位，由 driver 在写完后**重启端点**让变更生效
+    // 迁移**不停服**：写/删端点 FxProperties 值只需要句柄具备 KEY_SET_VALUE
+    // （`RegKey::open_for_write` 即是），与 audiodg 是否持有点端无关——在活动音频流
+    // 上删除槽位值同样成功。因此这里既不 stop AudioSrv 也不 taskkill audiodg；
+    // 修复分支若真的改写了槽位，由 driver 在写完后**重启端点**让变更生效
     // （引擎会缓存端点 APO 链，只改注册表不会立刻重载）。
     let report = migrate_install(from, to, config_from, snapshot_from).map_err(|e| e.to_string())?;
     if json {
@@ -929,8 +929,8 @@ pub fn uninstall(device_ref: &str, json: bool) -> Result<(), String> {
         }
     }
     // 卸载前先让 audiodg 退出：**不是为了"能删槽位值"**（写/删 FxProperties 值只需
-    // KEY_SET_VALUE 句柄，2026-09-16 实测：音频播放中、DLL 已被 audiodg 加载、
-    // audiodg 持有点端的情况下，槽位值照样删成功）。真正的理由是：
+    // KEY_SET_VALUE 句柄，音频播放中、DLL 已被 audiodg 加载、audiodg 持有点端的
+    // 情况下，槽位值照样删成功）。真正的理由是：
     // ① 释放模块映像——taskkill 后 audiodg 才会卸载 vxapo_driver.dll，
     //    否则紧随其后的重装/换 DLL 会因文件被占用而覆盖失败（NSIS 的
     //    installer-hooks.nsh 同样为此在安装/卸载前停服务）；
@@ -1092,12 +1092,12 @@ pub fn config_show(device_ref: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// per-device config 路径（方案 A，：C:\ProgramData\VxAPO\{GUID}\config.toml）。
+/// per-device config 路径（C:\ProgramData\VxAPO\{GUID}\config.toml）。
 ///
 /// **为什么不用 Documents**：APO 真实运行在 audiodg（SYSTEM 服务），调 `documents_folder()`
 /// 拿到 SYSTEM 的 Documents，读不到 CLI（用户进程）写进用户 Documents 的文件——
 /// 导致「改 Documents 的 config 没效果」。ProgramData 全用户共享，SYSTEM + 用户都可读写。
-/// 与 driver `resolve_config_path`（scheme A）保持一致。
+/// 与 driver `resolve_config_path` 的路径布局保持一致。
 fn config_path(guid: &str) -> Result<String, String> {
     Ok(format!(r"C:\ProgramData\VxAPO\{guid}\config.toml"))
 }
@@ -1337,7 +1337,7 @@ fn write_mapped(
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// Phase C：快照 = 变更对比 + 基线保持（CLI 引用规范 Phase C + 5.3）
+// 快照 = 变更对比 + 基线保持（CLI 引用规范 5.3）
 // ══════════════════════════════════════════════════════════════════════════════
 
 /// 快照文件路径：%ProgramData%\VxAPO\snapshots\{guid}.json
