@@ -75,61 +75,125 @@ pub(super) fn capture_snapshot(guid: &str) -> Result<String, String> {
     Ok(lines.join("\n"))
 }
 
-/// 基线 vs 当前 diff（红绿/±~ 表示，返回统计行文本）。
-pub fn snapshot_diff(guid: &str) -> Result<String, String> {
-    let path = snapshot_path(guid);
-    let baseline = std::fs::read_to_string(&path)
-        .map_err(|_| {
-            if lang() == Lang::En {
-                "No baseline: run install first to create a snapshot".to_string()
-            } else {
-                "无基线：先 install 建立快照".to_string()
-            }
-        })?;
-    let current = capture_snapshot(guid)?;
-    let b_lines: Vec<(String, String)> = baseline
-        .lines()
-        .filter_map(|l| l.split_once('=').map(|(k, v)| (k.to_string(), v.to_string())))
-        .collect();
-    let c_lines: Vec<(String, String)> = current
-        .lines()
-        .filter_map(|l| l.split_once('=').map(|(k, v)| (k.to_string(), v.to_string())))
-        .collect();
+/// 快照 diff 的纯计算结果（I/O 与打印留在 `snapshot_diff`，本结构与 `diff_snapshots` 可单测）。
+struct SnapshotDiff {
+    adds: usize,
+    dels: usize,
+    mods: usize,
+    same: usize,
+    /// 逐项去向，顺序：当前侧按行序（无变化 / 修改 / 新增）→ 基线侧被删除项。
+    /// 每项为 `(键, 基线值, 当前值)`；某一侧为 `None` 表示该项只存在于另一侧。
+    entries: Vec<(String, Option<String>, Option<String>)>,
+}
 
-    let mut adds = 0;
-    let mut dels = 0;
-    let mut mods = 0;
-    let mut same = 0;
+/// 纯函数：对比两份 `key=value` 文本（无 `=` 的行忽略）。
+fn diff_snapshots(baseline: &str, current: &str) -> SnapshotDiff {
+    let parse = |text: &str| -> Vec<(String, String)> {
+        text.lines()
+            .filter_map(|l| l.split_once('=').map(|(k, v)| (k.to_string(), v.to_string())))
+            .collect()
+    };
+    let b_lines = parse(baseline);
+    let c_lines = parse(current);
+    let mut diff = SnapshotDiff {
+        adds: 0,
+        dels: 0,
+        mods: 0,
+        same: 0,
+        entries: Vec::new(),
+    };
     for (k, v) in &c_lines {
         match b_lines.iter().find(|(bk, _)| bk == k) {
             Some((_, bv)) if bv == v => {
-                same += 1;
-                println!("    {} = {}", k, v);
+                diff.same += 1;
+                diff.entries.push((k.clone(), Some(bv.clone()), Some(v.clone())));
             }
             Some((_, bv)) => {
-                mods += 1;
-                println!("~ {} = {bv} → {v}", k);
+                diff.mods += 1;
+                diff.entries.push((k.clone(), Some(bv.clone()), Some(v.clone())));
             }
             None => {
-                adds += 1;
-                println!("+ {} = {}", k, v);
+                diff.adds += 1;
+                diff.entries.push((k.clone(), None, Some(v.clone())));
             }
         }
     }
-    for (k, _) in &b_lines {
+    for (k, bv) in &b_lines {
         if !c_lines.iter().any(|(ck, _)| ck == k) {
-            dels += 1;
-            if lang() == Lang::En {
-                println!("- {} = (deleted)", k);
-            } else {
-                println!("- {} = （已删除）", k);
-            }
+            diff.dels += 1;
+            diff.entries.push((k.clone(), Some(bv.clone()), None));
         }
     }
+    diff
+}
+
+/// 基线 vs 当前 diff（`~` 修改 / `+` 新增 / `-` 删除 / 其余无变化，返回统计行文本）。
+pub fn snapshot_diff(guid: &str) -> Result<String, String> {
+    let path = snapshot_path(guid);
+    let baseline = std::fs::read_to_string(&path).map_err(|_| {
+        if lang() == Lang::En {
+            "No baseline: run install first to create a snapshot".to_string()
+        } else {
+            "无基线：先 install 建立快照".to_string()
+        }
+    })?;
+    let current = capture_snapshot(guid)?;
+    let diff = diff_snapshots(&baseline, &current);
+    for (k, old, new) in &diff.entries {
+        match (old, new) {
+            (Some(bv), Some(v)) if bv == v => println!("    {} = {}", k, v),
+            (Some(bv), Some(v)) => println!("~ {} = {bv} → {v}", k),
+            (None, Some(v)) => println!("+ {} = {}", k, v),
+            (Some(_), None) => {
+                if lang() == Lang::En {
+                    println!("- {} = (deleted)", k);
+                } else {
+                    println!("- {} = （已删除）", k);
+                }
+            }
+            (None, None) => {}
+        }
+    }
+    let SnapshotDiff {
+        adds, dels, mods, same, ..
+    } = diff;
     if lang() == Lang::En {
-        Ok(format!("Changes: +{adds} added / -{dels} deleted / ~{mods} modified / {same} unchanged"))
+        Ok(format!(
+            "Changes: +{adds} added / -{dels} deleted / ~{mods} modified / {same} unchanged"
+        ))
     } else {
-        Ok(format!("变更：+{adds} 新增 / -{dels} 删除 / ~{mods} 修改 / {same} 无变化"))
+        Ok(format!(
+            "变更：+{adds} 新增 / -{dels} 删除 / ~{mods} 修改 / {same} 无变化"
+        ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn diff_counts_added_deleted_modified_unchanged() {
+        let d = diff_snapshots(
+            "slot_0=A\nslot_1=B\nchildPreMix=X\n",
+            "slot_0=A\nslot_1=C\nslot_2=D\n",
+        );
+        assert_eq!((d.same, d.mods, d.adds, d.dels), (1, 1, 1, 1));
+        // 顺序：当前侧行序（同/改/增），删除项置尾。
+        let keys: Vec<&str> = d.entries.iter().map(|(k, _, _)| k.as_str()).collect();
+        assert_eq!(keys, ["slot_0", "slot_1", "slot_2", "childPreMix"]);
+    }
+
+    #[test]
+    fn diff_ignores_lines_without_equals() {
+        let d = diff_snapshots("noise\nslot_0=A\n", "slot_0=A\n");
+        assert_eq!((d.same, d.mods, d.adds, d.dels), (1, 0, 0, 0));
+    }
+
+    #[test]
+    fn diff_of_empty_baseline_lists_all_added() {
+        let d = diff_snapshots("", "slot_0=A\nslot_1=B\n");
+        assert_eq!((d.same, d.mods, d.adds, d.dels), (0, 0, 2, 0));
     }
 }
 

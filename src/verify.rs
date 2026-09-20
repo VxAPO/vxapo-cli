@@ -289,13 +289,12 @@ fn run_pipe_verify(
     // 消息经 channel 送回主线程。
     let (tx, rx) = mpsc::channel::<String>();
     let trace_file = sink.progress_file.map(|p| p.to_path_buf());
-    // HANDLE 不是 Send，线程内以裸指针地址重建（CLI 进程内有效）。
     for handle in handles {
-        let server_handle_ptr = handle.0 as usize;
+        let server_handle = SendHandle(handle);
         let server_trace = trace_file.clone();
         let tx = tx.clone();
         std::thread::spawn(move || {
-            let server_handle = HANDLE(server_handle_ptr as *mut core::ffi::c_void);
+            let server_handle = server_handle.get();
             let mut buf: Vec<u8> = Vec::new();
             let mut chunk = [0u8; 512];
             loop {
@@ -399,6 +398,27 @@ fn trace_emit(progress_file: &Option<PathBuf>, event: serde_json::Value) {
         }
     }
 }
+
+/// 管道服务端句柄的线程移交包装。
+///
+/// `HANDLE` 语义上可跨线程使用（内核对象不绑定线程），但 windows-rs 未为其实现 `Send`，
+/// 也不该为此实现（全局放开会掩盖真正的多线程误用），故只在验证管道这一处显式包装。
+struct SendHandle(HANDLE);
+
+impl SendHandle {
+    /// 取出裸句柄（仅在本线程内使用）。
+    ///
+    /// 必须经方法取值：闭包对 `server_handle.0` 这种字段访问会触发 edition 2021 的
+    /// 精确捕获，只捕获裸指针字段（非 Send），反而绕过外层包装。
+    fn get(&self) -> HANDLE {
+        self.0
+    }
+}
+
+// SAFETY: `HANDLE` 只是内核对象的不透明值，`ConnectNamedPipe` / `ReadFile` /
+// `DisconnectNamedPipe` 均可在任意线程调用；每个句柄只移交给一个服务端线程，
+// 不存在跨线程别名访问。
+unsafe impl Send for SendHandle {}
 
 /// 创建命名管道服务端（DACL：SYSTEM + Administrators + Everyone）。
 ///

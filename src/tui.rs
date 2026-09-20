@@ -230,12 +230,12 @@ pub(super) fn install_and_guide(dev: &commands::DeviceRef, dev_idx: usize) {
     println!("  {}", tr!("安装将把 VxAPO 写入 PreMix+PostMix 槽位（默认 SfxEfx 模式）。", "Install will write VxAPO to PreMix+PostMix slots (default SfxEfx mode)."));
 
     print!("  {}（y={} / n={} / {}=）> ", tr!("保留现有 APO 为子 APO？", "Keep existing APO as child APO?"), tr!("保留", "keep"), tr!("不保留", "discard"), tr!("回车=保留", "Enter=keep"));
-    std::io::stdout().flush().unwrap();
+    let _ = std::io::stdout().flush();
     let keep = read_line();
     let keep_child = keep.trim().to_ascii_lowercase() != "n";
 
     print!("  {}？{} / q {} > ", tr!("开始安装（模式 SfxEfx）", "Start install (SfxEfx)"), tr!("按回车确认", "Press Enter to confirm"), tr!("取消", "cancel"));
-    std::io::stdout().flush().unwrap();
+    let _ = std::io::stdout().flush();
     let confirm = read_line();
     if confirm.trim().to_ascii_lowercase() == "q" {
         println!("{}", tr!("已取消。", "Cancelled."));
@@ -277,7 +277,7 @@ pub(super) fn config_menu(guid: &str) {
             }
             "e" => {
                 print!("{}> ", tr!("输入源文件路径（内容将原样写入 config.toml）", "Source file path (content will be written to config.toml)"));
-                std::io::stdout().flush().unwrap();
+                let _ = std::io::stdout().flush();
                 let file = read_line();
                 if file.trim().is_empty() {
                     println!("{}", tr!("已取消", "Cancelled"));
@@ -294,10 +294,30 @@ pub(super) fn config_menu(guid: &str) {
 }
 
 /// 读一行输入（trim 后返回）。
+///
+/// 输入被重定向关闭（EOF）或读取失败时给出双语提示并返回空串——菜单按「返回上一级」
+/// 处理，不会因 stdin 异常 panic。
 pub(super) fn read_line() -> String {
-    std::io::stdout().flush().unwrap();
+    // flush 失败不影响读取（stdout 已关闭时也没有可写的提示）。
+    let _ = std::io::stdout().flush();
     let mut input = String::new();
-    std::io::stdin().read_line(&mut input).unwrap();
+    match std::io::stdin().read_line(&mut input) {
+        Ok(0) => {
+            if lang() == Lang::En {
+                println!("(stdin closed - leaving interactive menu)");
+            } else {
+                println!("（标准输入已关闭——退出交互菜单）");
+            }
+        }
+        Ok(_) => {}
+        Err(e) => {
+            if lang() == Lang::En {
+                eprintln!("✗ Failed to read input: {e}");
+            } else {
+                eprintln!("✗ 读取输入失败：{e}");
+            }
+        }
+    }
     input.trim().to_string()
 }
 

@@ -344,3 +344,24 @@ mod tests {
 // 快照 = 变更对比 + 基线保持（CLI 引用规范 5.3）
 // ══════════════════════════════════════════════════════════════════════════════
 
+#[cfg(test)]
+mod parse_kv_tests {
+    use super::*;
+
+    /// `Key Value [unit]`：键转小写、单位（Hz/dB/ms）跳过。
+    #[test]
+    fn lowercases_keys_and_skips_units() {
+        let kv = parse_kv("Gain 3.0 dB Freq 1000 Hz Q 0.7").unwrap();
+        assert_eq!(kv.get("gain").map(String::as_str), Some("3.0"));
+        assert_eq!(kv.get("freq").map(String::as_str), Some("1000"));
+        assert_eq!(kv.get("q").map(String::as_str), Some("0.7"));
+    }
+
+    /// 奇数个 token：末尾落单的键忽略，不 panic。
+    #[test]
+    fn ignores_dangling_token() {
+        let kv = parse_kv("Gain 3.0 Dangling").unwrap();
+        assert_eq!(kv.len(), 1);
+        assert_eq!(kv.get("gain").map(String::as_str), Some("3.0"));
+    }
+}

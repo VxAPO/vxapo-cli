@@ -25,7 +25,14 @@ pub fn show_device_status(device_ref: &str) -> Result<(), String> {
                 "设备不在枚举列表".to_string()
             }
         })?;
-    let ep = d.endpoint.as_ref().unwrap();
+    // 上面的 `find` 谓词已要求 endpoint 存在；这里仍用 `let-else` 兜底而不是 unwrap。
+    let Some(ep) = d.endpoint.as_ref() else {
+        return Err(if lang() == Lang::En {
+            "Device not in enumeration list".to_string()
+        } else {
+            "设备不在枚举列表".to_string()
+        });
+    };
     println!("[{}]", ep.friendly_name);
     println!("  GUID: {}", ep.endpoint_guid);
     if lang() == Lang::En {
@@ -73,6 +80,10 @@ pub fn show_device_status(device_ref: &str) -> Result<(), String> {
 }
 
 /// 查询端点主音量（0.0–1.0；失败返回 None）。
+///
+/// **为什么自起 COM 枚举而不走 driver**：driver facade 只暴露设备/槽位/安装状态，
+/// 没有端点音量查询接口；这里按端点 GUID 直接问 `IAudioEndpointVolume`，仅供
+/// `show_device_status` 的诊断展示，不参与安装/卸载写路径。
 pub(super) fn endpoint_volume(guid: &str) -> Option<f32> {
     use windows::Win32::Media::Audio::{
         EDataFlow, IMMDeviceEnumerator, MMDeviceEnumerator, DEVICE_STATE_ACTIVE,

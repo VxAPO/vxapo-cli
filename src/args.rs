@@ -41,12 +41,14 @@ impl ArgParser {
                 (Some(name), _) => {
                     let value = match inline {
                         Some(v) => v,
-                        None => {
-                            if argv.get(i + 1).is_some() {
+                        // 缺值（选项是最后一个参数）→ 空串，不 panic、也不吞掉别的选项。
+                        None => match argv.get(i + 1) {
+                            Some(v) => {
                                 i += 1;
+                                v.clone()
                             }
-                            argv.get(i).cloned().unwrap_or_default()
-                        }
+                            None => String::new(),
+                        },
                     };
                     opts.push((name.to_string(), value));
                 }
@@ -234,3 +236,87 @@ pub(super) fn parse_device_file(args: &[String]) -> (String, String) {
     (p.value("-d"), p.value("-f"))
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn argv(items: &[&str]) -> Vec<String> {
+        items.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn valued_option_accepts_short_long_and_inline_forms() {
+        for input in [
+            vec!["-d", "DEV"],
+            vec!["--device", "DEV"],
+            vec!["--device=DEV"],
+        ] {
+            let p = ArgParser::new(&argv(&input), &[("-d", &["--device"][..])], &[]);
+            assert_eq!(p.get("-d"), Some("DEV"), "{input:?}");
+        }
+    }
+
+    #[test]
+    fn last_occurrence_wins() {
+        let p = ArgParser::new(&argv(&["-d", "A", "-d", "B"]), &[("-d", &[][..])], &[]);
+        assert_eq!(p.get("-d"), Some("B"));
+    }
+
+    #[test]
+    fn flags_do_not_consume_values() {
+        let p = ArgParser::new(
+            &argv(&["-d", "DEV", "--verify", "--no-child"]),
+            &[("-d", &[][..])],
+            &[("--verify", &[][..]), ("--no-child", &[][..])],
+        );
+        assert_eq!(p.get("-d"), Some("DEV"));
+        assert!(p.flag("--verify") && p.flag("--no-child"));
+        assert!(!p.flag("--mode"));
+    }
+
+    #[test]
+    fn positional_keeps_first_bare_argument_and_unknown_options_ignored() {
+        let p = ArgParser::new(&argv(&["GUID", "--bogus", "extra"]), &[], &[]);
+        assert_eq!(p.positional(), Some("GUID"));
+    }
+
+    #[test]
+    fn missing_value_yields_none_not_panic() {
+        let p = ArgParser::new(&argv(&["-d"]), &[("-d", &[][..])], &[]);
+        assert_eq!(p.get("-d"), None);
+    }
+
+    #[test]
+    fn install_parse_smoke() {
+        let (dev, mode, no_child, verify, timeout, progress) = parse_install(&argv(&[
+            "-d",
+            "DEV",
+            "--mode",
+            "SfxMfx",
+            "--no-child",
+            "--verify",
+            "--timeout=300",
+            "--progress-file",
+            r"C:\tmp\p.json",
+        ]));
+        assert_eq!(dev, "DEV");
+        assert_eq!(mode.as_deref(), Some("SfxMfx"));
+        assert!(no_child && verify);
+        assert_eq!(timeout, 300);
+        assert_eq!(progress.as_deref(), Some(r"C:\tmp\p.json"));
+    }
+
+    #[test]
+    fn install_timeout_defaults_and_invalid_value_falls_back() {
+        let (_, _, _, _, timeout, _) = parse_install(&argv(&["-d", "DEV"]));
+        assert_eq!(timeout, 180);
+        let (_, _, _, _, timeout, _) = parse_install(&argv(&["-d", "DEV", "--timeout", "abc"]));
+        assert_eq!(timeout, 180);
+    }
+
+    #[test]
+    fn device_file_parse_smoke() {
+        let (dev, file) = parse_device_file(&argv(&["-d", "DEV", "-f", "cfg.toml"]));
+        assert_eq!((dev.as_str(), file.as_str()), ("DEV", "cfg.toml"));
+    }
+}
