@@ -15,10 +15,9 @@ use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use serde_json::json;
+use vxapo_driver::install::device::info::find_endpoint_path;
 use vxapo_driver::install::device::slots::{ChildApoKind, InstallMode, read_child_apo_guid};
-use vxapo_driver::install::selector::operation::{
-    InstallConfig, find_endpoint_path, write_install_config,
-};
+use vxapo_driver::install::selector::operation::{InstallConfig, write_install_config};
 use vxapo_driver::sys::registry::RegKey;
 use windows::Win32::Foundation::{HANDLE, HLOCAL, INVALID_HANDLE_VALUE, LocalFree};
 use windows::Win32::Storage::FileSystem::{ReadFile, PIPE_ACCESS_INBOUND};

@@ -5,13 +5,13 @@
 
 use std::path::Path;
 
-use vxapo_driver::install::device::info::enumerate_devices;
+use vxapo_driver::install::device::info::{enumerate_devices, find_endpoint_path};
 use vxapo_driver::install::device::slots::{ChildApoKind, child_apo_key_exists, read_child_apo_guid};
 use vxapo_driver::install::device::stale::{
-    cleanup_orphan, fix_config_acl, list_stale_installs, migrate_install,
+    cleanup_orphan, fix_config_acl, list_stale_installs,
 };
 use vxapo_driver::install::selector::operation::{
-    find_endpoint_path, install_endpoint, uninstall_endpoint, InstallConfig,
+    install_endpoint, migrate_install, uninstall_endpoint, InstallConfig,
 };
 use vxapo_driver::object::dll_exports::register_apo_with_path;
 use vxapo_driver::sys::com::prelude::guid_to_string;
