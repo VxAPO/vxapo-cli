@@ -2,7 +2,7 @@
 
 <!-- 徽章区（待补）：CI 状态 · 许可证 · 最近发布 -->
 
-[中文](#vxapo-cli) · [English](#vxapo-cli-english) · [项目总览](../vxapo-docs/overview/zh/项目概览.md)
+[中文](#vxapo-cli) · [English](#vxapo-cli-english)
 
 VxAPO CLI 是 VxAPO 的命令行工具，负责设备管理、配置读写与诊断。App（Tauri）通过提权子进程
 调用它完成安装、卸载与验证。CLI 把注册表写入交给 driver 的事务层，自己不决定槽位策略。
@@ -129,7 +129,7 @@ cargo test        # 22 个测试
 
 <!-- Badges (TODO): CI status · license · latest release -->
 
-[中文](#vxapo-cli) · [English](#vxapo-cli-english) · [Project overview](../vxapo-docs/overview/en/Project%20Overview.md)
+[中文](#vxapo-cli) · [English](#vxapo-cli-english)
 
 VxAPO CLI is the command-line tool for VxAPO. It manages devices, reads and writes config,
 and runs diagnostics. The App (Tauri) calls it as an elevated subprocess for install,
