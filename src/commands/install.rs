@@ -368,6 +368,12 @@ fn contract_stale(s: &vxapo_driver::StaleInstall) -> StaleInstall {
             // 未知状态 → unmatched（最保守：只给清理出口，不提示迁移）。
             _ => StaleTargetState::Unmatched,
         },
+        // 未知/未命中一律不可自动修复（最保守）。
+        auto_repairable: s.auto_repairable
+            && matches!(
+                s.target_state.as_str(),
+                "matched_partial" | "matched_healthy"
+            ),
     }
 }
 

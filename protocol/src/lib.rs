@@ -385,6 +385,10 @@ pub struct StaleInstall {
     pub target_guid: Option<String>,
     pub target_name: Option<String>,
     pub target_state: StaleTargetState,
+    /// 可自动修复（App 启动时无需询问即可执行 `stale migrate`）：
+    /// 目标唯一命中 + 旧记录配置有意义 + 目标目录没有有意义的配置。
+    /// 判据由 driver 给出（单一事实源）；false 时交横幅由用户决定。
+    pub auto_repairable: bool,
 }
 
 /// 旧 GUID 迁移报告（`stale migrate --json`）；字段与 driver `MigrationReport` 对齐。

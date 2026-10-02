@@ -116,7 +116,8 @@ pub fn require_admin() -> Result<(), String> {
 }
 
 // per-device config 路径与快照目录由 driver 提供（`device_config_path` / `snapshot_dir`），
-// 保证 CLI 与 APO（audiodg，SYSTEM 服务）读同一份 `C:\ProgramData\VxAPO\...` 布局。
+// 保证 CLI 与 APO（audiodg，服务账户 LOCAL SERVICE + Audiosrv 服务 SID）读同一份
+// `C:\ProgramData\VxAPO\...` 布局。
 
 // ── 子模块（注册 / 状态 / 安装 / 卸载 / 配置转换 / 快照）──────────────────
 
