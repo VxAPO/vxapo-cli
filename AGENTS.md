@@ -114,3 +114,32 @@ cargo clippy --all-targets -- -D warnings   # 当前退出码 101
 因此：**不要**把 clippy 通过当作本仓的提交门槛（会永远提交不了），
 但也**不要**因为顺手就大规模清理它——那属于独立任务，应与格式化分开。
 新代码尽量不要新增告警。
+
+---
+
+## 8. 与 driver 的接口：只有 facade 可用
+
+本仓通过 path 依赖 `../vxapo-driver`。**driver 的所有模块都是 `pub(crate)`**，
+对外只经它 `src/lib.rs` 末尾的 facade（约 20 个 `pub use`）暴露。
+
+**因此：`vxapo_driver::` 后面只能用 facade 登记过的条目。** 若需要某个还没导出的
+driver 内部 API，正确做法是**在 driver 仓的 `lib.rs` 里登记**，而不是绕路
+（driver 的 `lib.rs` 顶部明确要求「新增对外 API 时必须同时在此登记」）。
+
+已登记的常用入口：`RegKey` / `RegValue`、`SlotValue` / `InstallMode` / `ChildApoKind`、
+`EndpointInfo` / `EndpointState` / `Flow`、`InstallConfig`、
+`effect_param_specs` / `EffectParamSpec` / `EffectSpec`、
+`install_endpoint` / `uninstall_endpoint` / `migrate_install` / `write_install_config`、
+注册表与服务生命周期的一组函数（`stop_audio_service`、
+`restart_audio_service_wait`、`ensure_audio_service_running`、
+`start_audio_service_with_dependents`、`stop_audio_service_with_dependents`、
+`wait_for_audiodg_exit`）、`guid_to_string`、`VxApoError`。
+
+> **注意区分同名函数**：整服重启是 `restart_audio_service_wait(stop_secs, start_secs)`。
+> driver 内部另有一个无参数的 `restart_audio_service`，它是 `#[cfg(test)]` 且已废弃删除——
+> **不要**在 cli 里引用它。
+
+### 依赖方向与格式化边界（**本仓最大的坑**）
+
+由于是 path 依赖，`cargo fmt --all` 会**连带格式化 driver 的文件**（实测 589 个 hunk 中
+有 445 个属 driver）。故本仓一律用显式 `-p`，见 §2。
