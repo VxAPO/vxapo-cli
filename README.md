@@ -10,6 +10,10 @@ VxAPO CLI 是 VxAPO 的命令行工具，负责设备管理、配置读写与诊
 阅读顺序：定位与边界 → 命令一览 → 安装与验证 → 交互模式 → 契约 crate → 与 Driver / App 的
 边界 → 上手 → 测试 → 参考。
 
+> **在本仓工作前先读 [`AGENTS.md`](AGENTS.md)**（面向人与 AI）：格式由 `cargo fmt` 单一
+> 权威决定、提交前须 `git config core.hooksPath .githooks`、**`cargo fmt --all` 会连带
+> 格式化 driver 的文件（故一律用 `-p`）**、以及只能用 driver facade 登记的 API。
+
 ## 1 · 定位与边界
 
 | CLI 负责 | CLI 不负责 |
@@ -139,6 +143,11 @@ and does not choose the slot strategy itself.
 Reading order: scope and boundaries → commands → install and verification → interactive
 mode → contract crate → boundaries with the Driver / App → getting started → tests →
 references.
+
+> **Read [`AGENTS.md`](AGENTS.md) before working in this repository** (for humans and AI):
+> formatting is decided solely by `cargo fmt`, run `git config core.hooksPath .githooks`
+> once per clone, **`cargo fmt --all` also reformats driver's files (always use `-p`)**,
+> and only APIs registered in driver's facade may be used.
 
 ## 1 · Scope and boundaries
 
