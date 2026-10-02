@@ -123,7 +123,8 @@ cargo test        # 22 个测试
 ## 文档与许可
 
 - 项目文档见 [`../vxapo-docs`](../vxapo-docs)，CLI 规范见 [`../vxapo-docs/cli`](../vxapo-docs/cli)。
-- 许可证：GPL-3.0-or-later。
+- 许可证：GPL-3.0-or-later（全文见 [`LICENSE`](LICENSE)）。
+  Copyright (C) 2026 VxAPO。本程序**不提供任何担保**，详见 GPL-3.0 第 15、16 条。
 
 ---
 
@@ -270,4 +271,6 @@ implementation and contains no Equalizer APO code. Equalizer APO © Jonas Theder
 
 - Project documentation: [`../vxapo-docs`](../vxapo-docs). CLI reference:
   [`../vxapo-docs/cli`](../vxapo-docs/cli).
-- License: GPL-3.0-or-later.
+- License: GPL-3.0-or-later (full text in [`LICENSE`](LICENSE)).
+  Copyright (C) 2026 VxAPO. This program comes with **absolutely no warranty**; see
+  sections 15 and 16 of GPL-3.0.
