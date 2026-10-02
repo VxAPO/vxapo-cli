@@ -16,21 +16,21 @@ use std::time::{Duration, Instant};
 
 use serde_json::json;
 
-use vxapo_protocol::{InstallProgressEvent, ServiceAction};
 use vxapo_driver::{
     find_endpoint_path, read_child_apo_guid, write_install_config, ChildApoKind, InstallConfig,
     InstallMode, RegKey,
 };
-use windows::Win32::Foundation::{HANDLE, HLOCAL, INVALID_HANDLE_VALUE, LocalFree};
-use windows::Win32::Storage::FileSystem::{ReadFile, PIPE_ACCESS_INBOUND};
-use windows::Win32::System::Pipes::{
-    ConnectNamedPipe, CreateNamedPipeW, DisconnectNamedPipe, PIPE_READMODE_MESSAGE, PIPE_TYPE_MESSAGE,
-    PIPE_UNLIMITED_INSTANCES, PIPE_WAIT,
-};
+use vxapo_protocol::{InstallProgressEvent, ServiceAction};
+use windows::core::HSTRING;
+use windows::Win32::Foundation::{LocalFree, HANDLE, HLOCAL, INVALID_HANDLE_VALUE};
 use windows::Win32::Security::Authorization::ConvertStringSecurityDescriptorToSecurityDescriptorW;
 use windows::Win32::Security::{PSECURITY_DESCRIPTOR, SECURITY_ATTRIBUTES};
+use windows::Win32::Storage::FileSystem::{ReadFile, PIPE_ACCESS_INBOUND};
+use windows::Win32::System::Pipes::{
+    ConnectNamedPipe, CreateNamedPipeW, DisconnectNamedPipe, PIPE_READMODE_MESSAGE,
+    PIPE_TYPE_MESSAGE, PIPE_UNLIMITED_INSTANCES, PIPE_WAIT,
+};
 use windows::Win32::System::Registry::HKEY_LOCAL_MACHINE;
-use windows::core::HSTRING;
 
 use crate::commands::DeviceRef;
 use crate::i18n::tr;
@@ -105,7 +105,11 @@ pub(crate) fn mode_str(m: InstallMode) -> &'static str {
 /// 模式尝试顺序：preferred 第一，其余按 EAPO 回退序 [SfxEfx, SfxMfx, LfxGfx]。
 fn mode_order(preferred: InstallMode) -> Vec<InstallMode> {
     let mut v = vec![preferred];
-    for m in [InstallMode::SfxEfx, InstallMode::SfxMfx, InstallMode::LfxGfx] {
+    for m in [
+        InstallMode::SfxEfx,
+        InstallMode::SfxMfx,
+        InstallMode::LfxGfx,
+    ] {
         if m != preferred {
             v.push(m);
         }
@@ -204,21 +208,31 @@ pub(crate) fn install_verify(
         let mode_name = mode_str(*mode);
 
         // 1. 纯注册表写入（覆盖安装天然安全，无需先 uninstall）。
-        sink.emit(InstallProgressEvent::InstallWrite { mode: mode_name.to_string() });
+        sink.emit(InstallProgressEvent::InstallWrite {
+            mode: mode_name.to_string(),
+        });
         write_install_config(&dev.guid, &dev.name, &dev.connection, &mode_config)
             .map_err(|e| format!("写入安装配置失败：{e}"))?;
 
         // 2. 停 AudioSrv（含依赖服务）。
-        sink.emit(InstallProgressEvent::Service { action: ServiceAction::Stopping });
+        sink.emit(InstallProgressEvent::Service {
+            action: ServiceAction::Stopping,
+        });
         vxapo_driver::stop_audio_service_with_dependents(STOP_TIMEOUT_SECS)
             .map_err(|e| format!("停止音频服务失败：{e}"))?;
-        sink.emit(InstallProgressEvent::Service { action: ServiceAction::Stopped });
+        sink.emit(InstallProgressEvent::Service {
+            action: ServiceAction::Stopped,
+        });
 
         // 3. 启动 AudioSrv（含依赖服务，轮询 RUNNING）。
-        sink.emit(InstallProgressEvent::Service { action: ServiceAction::Starting });
+        sink.emit(InstallProgressEvent::Service {
+            action: ServiceAction::Starting,
+        });
         vxapo_driver::start_audio_service_with_dependents(START_TIMEOUT_SECS)
             .map_err(|e| format!("启动音频服务失败：{e}"))?;
-        sink.emit(InstallProgressEvent::Service { action: ServiceAction::Running });
+        sink.emit(InstallProgressEvent::Service {
+            action: ServiceAction::Running,
+        });
         // SCM 报 RUNNING 不代表音频引擎已就绪：先静默等待，避免后续
         // IMMDevice/IAudioClient 激活在引擎启动窗口内无限期阻塞。
         std::thread::sleep(Duration::from_millis(POST_SERVICE_SETTLE_MS));
@@ -238,7 +252,10 @@ pub(crate) fn install_verify(
         // 5. 计分与事件。
         let score = score_of(&report, is_capture, expected_premix, expected_postmix);
         // 用户端只接收 mode；计分仅内部用于模式重试与 complete 事件。
-        sink.emit(InstallProgressEvent::Test { mode: mode_name.to_string(), pipe: None });
+        sink.emit(InstallProgressEvent::Test {
+            mode: mode_name.to_string(),
+            pipe: None,
+        });
         if score > best_score {
             best_score = score;
             best_mode = Some(*mode);
@@ -299,7 +316,10 @@ fn run_pipe_verify(
     let handles = create_pipe_servers(&full_path, PIPE_INSTANCES)?;
 
     write_test_pipe_name(PIPE_NAME)?;
-    sink.emit(InstallProgressEvent::Test { mode: mode_name.to_string(), pipe: Some(PIPE_NAME.to_string()) });
+    sink.emit(InstallProgressEvent::Test {
+        mode: mode_name.to_string(),
+        pipe: Some(PIPE_NAME.to_string()),
+    });
 
     // 服务端线程：接受多个客户端连接（每个 APO 实例连一次、发一行即关），
     // 消息经 channel 送回主线程。
@@ -319,14 +339,18 @@ fn run_pipe_verify(
                     // ERROR_PIPE_CONNECTED=535：客户端在 Connect 前已连上，视为成功。
                     let code = std::io::Error::last_os_error().raw_os_error().unwrap_or(0) as u32;
                     if code != 535 {
-                        trace_emit(&server_trace, json!({"event":"trace","step":"server_exit","err":code}));
+                        trace_emit(
+                            &server_trace,
+                            json!({"event":"trace","step":"server_exit","err":code}),
+                        );
                         break;
                     }
                 }
                 buf.clear();
                 loop {
                     let mut read = 0u32;
-                    if unsafe { ReadFile(server_handle, Some(&mut chunk), Some(&mut read), None) }.is_err()
+                    if unsafe { ReadFile(server_handle, Some(&mut chunk), Some(&mut read), None) }
+                        .is_err()
                     {
                         break;
                     }
@@ -338,7 +362,10 @@ fn run_pipe_verify(
                         let line: Vec<u8> = buf.drain(..=pos).collect();
                         let s = String::from_utf8_lossy(&line).trim().to_string();
                         if !s.is_empty() {
-                            trace_emit(&server_trace, json!({"event":"trace","step":"server_msg","line":s}));
+                            trace_emit(
+                                &server_trace,
+                                json!({"event":"trace","step":"server_msg","line":s}),
+                            );
                             let _ = tx.send(s);
                         }
                     }
@@ -347,7 +374,10 @@ fn run_pipe_verify(
             }
         });
     }
-    trace_emit(&trace_file, json!({"event": "trace", "step": "server_spawned"}));
+    trace_emit(
+        &trace_file,
+        json!({"event": "trace", "step": "server_spawned"}),
+    );
 
     // 触发 audiodg 建图。慢设备上 COM 调用可能耗时 5–8s，不再设触发级超时
     // （避免误杀）；触发线程 panic 时 recv 返回 Disconnected，按"无消息"继续。
@@ -356,10 +386,16 @@ fn run_pipe_verify(
     let trigger_guid = guid.to_string();
     let trigger_trace = trace_file.clone();
     let trigger_thread = std::thread::spawn(move || {
-        trace_emit(&trigger_trace, json!({"event": "trace", "step": "trigger_start"}));
+        trace_emit(
+            &trigger_trace,
+            json!({"event": "trace", "step": "trigger_start"}),
+        );
         let r = trigger_apo_load(&trigger_guid, is_capture);
         match &r {
-            Ok(()) => trace_emit(&trigger_trace, json!({"event": "trace", "step": "trigger_ok"})),
+            Ok(()) => trace_emit(
+                &trigger_trace,
+                json!({"event": "trace", "step": "trigger_ok"}),
+            ),
             Err(e) => trace_emit(
                 &trigger_trace,
                 json!({"event": "trace", "step": "trigger_err", "err": e}),
@@ -367,19 +403,31 @@ fn run_pipe_verify(
         }
         let _ = trigger_tx.send(r);
     });
-    trace_emit(&trace_file, json!({"event": "trace", "step": "trigger_spawned"}));
+    trace_emit(
+        &trace_file,
+        json!({"event": "trace", "step": "trigger_spawned"}),
+    );
     let _ = trigger_rx.recv();
-    trace_emit(&trace_file, json!({"event": "trace", "step": "trigger_wait_done"}));
+    trace_emit(
+        &trace_file,
+        json!({"event": "trace", "step": "trigger_wait_done"}),
+    );
     let _ = trigger_thread.join();
 
     // 收集上报直到全部预期阶段到齐或超时。
-    trace_emit(&trace_file, json!({"event": "trace", "step": "collect_start"}));
+    trace_emit(
+        &trace_file,
+        json!({"event": "trace", "step": "collect_start"}),
+    );
     let mut report = PipeReport::default();
     // 固定迭代次数 + 短超时（200ms × PIPE_WAIT_SECS*5），绝对有界。
     for _ in 0..(PIPE_WAIT_SECS * 5) {
         match rx.recv_timeout(Duration::from_millis(200)) {
             Ok(line) => {
-                trace_emit(&trace_file, json!({"event":"trace","step":"pipe_msg","line":line}));
+                trace_emit(
+                    &trace_file,
+                    json!({"event":"trace","step":"pipe_msg","line":line}),
+                );
                 parse_pipe_message(&line, &mut report);
             }
             Err(_) => break,
@@ -396,7 +444,10 @@ fn run_pipe_verify(
     // ConnectNamedPipe 上，CloseHandle 会一直等该等待完成（导致主线程永久卡死，
     // 只能靠全局看门狗 abort）。进程在 main 返回时由系统回收所有句柄，
     // 这里直接放行即可。
-    trace_emit(&trace_file, json!({"event": "trace", "step": "cleanup_done"}));
+    trace_emit(
+        &trace_file,
+        json!({"event": "trace", "step": "cleanup_done"}),
+    );
     // 注意：**不能 join 服务端线程**——它阻塞在 ConnectNamedPipe 等待 APO 连接，
     // 主线程 CloseHandle 无法可靠唤醒该等待；进程在 main 返回时结束所有线程，
     // 直接放行即可（阻塞线程不会阻止 Rust 进程退出）。
@@ -441,7 +492,10 @@ unsafe impl Send for SendHandle {}
 /// 实测 audiodg 的访问身份对不上 SYSTEM/Administrators ACE（CreateFileW 报
 /// ERROR_ACCESS_DENIED=5），EAPO 的验证管道同样允许 Everyone；验证管道仅存活
 /// 数秒且名称固定，放开 Everyone 可写是安全的。
-fn create_pipe_servers(full_path: &str, count: u32) -> Result<Vec<windows::Win32::Foundation::HANDLE>, String> {
+fn create_pipe_servers(
+    full_path: &str,
+    count: u32,
+) -> Result<Vec<windows::Win32::Foundation::HANDLE>, String> {
     // SAFETY: 无前置条件；SD 由 LocalFree 回收。
     let mut sd = PSECURITY_DESCRIPTOR(std::ptr::null_mut());
     unsafe {
@@ -494,14 +548,18 @@ fn create_pipe_servers(full_path: &str, count: u32) -> Result<Vec<windows::Win32
 /// E_PENDING / AUDCLNT_E_DEVICE_INVALIDATED 等瞬时错误重试 5×500ms。
 fn trigger_apo_load(guid: &str, is_capture: bool) -> Result<(), String> {
     use windows::Win32::Media::Audio::{
-        AUDCLNT_E_DEVICE_INVALIDATED, AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_NOPERSIST,
-        IAudioClient, IMMDeviceEnumerator, MMDeviceEnumerator,
+        IAudioClient, IMMDeviceEnumerator, MMDeviceEnumerator, AUDCLNT_E_DEVICE_INVALIDATED,
+        AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_NOPERSIST,
     };
     use windows::Win32::System::Com::{
-        CLSCTX_ALL, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx, CoTaskMemFree,
+        CoCreateInstance, CoInitializeEx, CoTaskMemFree, CLSCTX_ALL, COINIT_MULTITHREADED,
     };
 
-    let flow = if is_capture { "0.0.1.00000000" } else { "0.0.0.00000000" };
+    let flow = if is_capture {
+        "0.0.1.00000000"
+    } else {
+        "0.0.0.00000000"
+    };
     let id = format!("{{{flow}}}.{guid}");
     let mut last_err = tr("触发 APO 加载失败", "APO load trigger failed").to_string();
 
@@ -580,15 +638,27 @@ mod tests {
     fn mode_order_preferred_first_with_eapo_fallback() {
         assert_eq!(
             mode_order(InstallMode::SfxMfx),
-            vec![InstallMode::SfxMfx, InstallMode::SfxEfx, InstallMode::LfxGfx]
+            vec![
+                InstallMode::SfxMfx,
+                InstallMode::SfxEfx,
+                InstallMode::LfxGfx
+            ]
         );
         assert_eq!(
             mode_order(InstallMode::LfxGfx),
-            vec![InstallMode::LfxGfx, InstallMode::SfxEfx, InstallMode::SfxMfx]
+            vec![
+                InstallMode::LfxGfx,
+                InstallMode::SfxEfx,
+                InstallMode::SfxMfx
+            ]
         );
         assert_eq!(
             mode_order(InstallMode::SfxEfx),
-            vec![InstallMode::SfxEfx, InstallMode::SfxMfx, InstallMode::LfxGfx]
+            vec![
+                InstallMode::SfxEfx,
+                InstallMode::SfxMfx,
+                InstallMode::LfxGfx
+            ]
         );
     }
 

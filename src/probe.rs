@@ -6,13 +6,24 @@ use crate::endpoint::{Endpoint, EndpointKind};
 use crate::reg;
 
 const PATH_RENDER: &str = "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\MMDevices\\Audio\\Render";
-const PATH_CAPTURE: &str = "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\MMDevices\\Audio\\Capture";
+const PATH_CAPTURE: &str =
+    "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\MMDevices\\Audio\\Capture";
 
 pub fn probe_all() -> Vec<Endpoint> {
     let mut endpoints = Vec::new();
     let mut idx = 0;
-    probe_path(PATH_RENDER, EndpointKind::Playback, &mut endpoints, &mut idx);
-    probe_path(PATH_CAPTURE, EndpointKind::Capture, &mut endpoints, &mut idx);
+    probe_path(
+        PATH_RENDER,
+        EndpointKind::Playback,
+        &mut endpoints,
+        &mut idx,
+    );
+    probe_path(
+        PATH_CAPTURE,
+        EndpointKind::Capture,
+        &mut endpoints,
+        &mut idx,
+    );
     endpoints
 }
 
@@ -43,10 +54,10 @@ fn probe_path(base: &str, ep_kind: EndpointKind, out: &mut Vec<Endpoint>, idx: &
 
         let props = key.open_subkey_with_flags(format!("{guid}\\Properties"), KEY_READ);
 
-        let format_raw = props
-            .as_ref()
-            .ok()
-            .and_then(|p| p.get_raw_value("{f19f064d-082c-4e27-bc73-6882a1bb8e4c},0").ok());
+        let format_raw = props.as_ref().ok().and_then(|p| {
+            p.get_raw_value("{f19f064d-082c-4e27-bc73-6882a1bb8e4c},0")
+                .ok()
+        });
 
         let (sample_rate, channels, bit_depth, channel_mask) = format_raw
             .and_then(|rv| {
@@ -58,8 +69,14 @@ fn probe_path(base: &str, ep_kind: EndpointKind, out: &mut Vec<Endpoint>, idx: &
             })
             .unwrap_or((None, None, None, None));
 
-        let name_interface = props.as_ref().ok().and_then(|p| reg::read_reg_sz(p, reg::VAL_NAME_INTERFACE));
-        let name_product = props.as_ref().ok().and_then(|p| reg::read_reg_sz(p, reg::VAL_NAME_PRODUCT));
+        let name_interface = props
+            .as_ref()
+            .ok()
+            .and_then(|p| reg::read_reg_sz(p, reg::VAL_NAME_INTERFACE));
+        let name_product = props
+            .as_ref()
+            .ok()
+            .and_then(|p| reg::read_reg_sz(p, reg::VAL_NAME_PRODUCT));
 
         let name = match (&name_interface, &name_product) {
             (Some(a), Some(b)) => format!("{a} ({b})"),
@@ -71,9 +88,10 @@ fn probe_path(base: &str, ep_kind: EndpointKind, out: &mut Vec<Endpoint>, idx: &
             }
         };
 
-        let hw_id = props.as_ref().ok().and_then(|p| {
-            reg::read_reg_sz(p, "{80f111c3-b103-42e1-afb6-db7a6fa8be1f},0")
-        });
+        let hw_id = props
+            .as_ref()
+            .ok()
+            .and_then(|p| reg::read_reg_sz(p, "{80f111c3-b103-42e1-afb6-db7a6fa8be1f},0"));
 
         let dedup_key = hw_id.clone().unwrap_or_else(|| name.clone());
         if !seen.insert(dedup_key) {
@@ -90,10 +108,18 @@ fn probe_path(base: &str, ep_kind: EndpointKind, out: &mut Vec<Endpoint>, idx: &
                     let mut de: Option<u32> = None;
 
                     if let Ok(fx) = ep.open_subkey_with_flags("FxProperties", KEY_READ) {
-                        if s.is_none() { s = reg::read_reg_sz(&fx, reg::VAL_SFX); }
-                        if m.is_none() { m = reg::read_reg_sz(&fx, reg::VAL_MFX); }
-                        if e.is_none() { e = reg::read_reg_sz(&fx, reg::VAL_EFX); }
-                        de = fx.get_value("{1da5d803-d492-4edd-8c23-e0c0ffee7f0e},5").ok();
+                        if s.is_none() {
+                            s = reg::read_reg_sz(&fx, reg::VAL_SFX);
+                        }
+                        if m.is_none() {
+                            m = reg::read_reg_sz(&fx, reg::VAL_MFX);
+                        }
+                        if e.is_none() {
+                            e = reg::read_reg_sz(&fx, reg::VAL_EFX);
+                        }
+                        de = fx
+                            .get_value("{1da5d803-d492-4edd-8c23-e0c0ffee7f0e},5")
+                            .ok();
                     }
 
                     if ef.is_none() {
@@ -107,9 +133,18 @@ fn probe_path(base: &str, ep_kind: EndpointKind, out: &mut Vec<Endpoint>, idx: &
                 Err(_) => (None, None, None, None, None),
             };
 
-        let sfx_is_system = sfx.as_ref().map(|s| crate::knowledge::is_system_apo(s)).unwrap_or(false);
-        let mfx_is_system = mfx.as_ref().map(|s| crate::knowledge::is_system_apo(s)).unwrap_or(false);
-        let efx_is_system = efx.as_ref().map(|s| crate::knowledge::is_system_apo(s)).unwrap_or(false);
+        let sfx_is_system = sfx
+            .as_ref()
+            .map(|s| crate::knowledge::is_system_apo(s))
+            .unwrap_or(false);
+        let mfx_is_system = mfx
+            .as_ref()
+            .map(|s| crate::knowledge::is_system_apo(s))
+            .unwrap_or(false);
+        let efx_is_system = efx
+            .as_ref()
+            .map(|s| crate::knowledge::is_system_apo(s))
+            .unwrap_or(false);
 
         out.push(Endpoint {
             index: *idx,
@@ -134,7 +169,6 @@ fn probe_path(base: &str, ep_kind: EndpointKind, out: &mut Vec<Endpoint>, idx: &
     }
 }
 
-
 /// 交互模式的应用状态：端点列表；`refresh` 重新探测。
 pub struct App {
     pub endpoints: Vec<Endpoint>,
@@ -142,7 +176,9 @@ pub struct App {
 
 impl App {
     pub fn new() -> Self {
-        App { endpoints: Vec::new() }
+        App {
+            endpoints: Vec::new(),
+        }
     }
 
     pub fn refresh(&mut self) {

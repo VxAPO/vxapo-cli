@@ -21,12 +21,12 @@ pub fn snapshot_device(guid: &str, replace: bool) -> Result<(), String> {
     let snapshot = capture_snapshot(guid)?;
     if let Some(parent) = Path::new(&path).parent() {
         std::fs::create_dir_all(parent).map_err(|e| {
-        if lang() == Lang::En {
-            format!("Failed to create snapshot directory: {e}")
-        } else {
-            format!("创建快照目录失败：{e}")
-        }
-    })?;
+            if lang() == Lang::En {
+                format!("Failed to create snapshot directory: {e}")
+            } else {
+                format!("创建快照目录失败：{e}")
+            }
+        })?;
     }
     std::fs::write(&path, &snapshot).map_err(|e| {
         if lang() == Lang::En {
@@ -56,7 +56,12 @@ pub(super) fn capture_snapshot(guid: &str) -> Result<String, String> {
     })?;
     let d = devices
         .iter()
-        .find(|d| d.endpoint.as_ref().map(|e| e.endpoint_guid.eq_ignore_ascii_case(guid)).unwrap_or(false))
+        .find(|d| {
+            d.endpoint
+                .as_ref()
+                .map(|e| e.endpoint_guid.eq_ignore_ascii_case(guid))
+                .unwrap_or(false)
+        })
         .ok_or_else(|| "设备不在枚举列表".to_string())?;
     let mut lines = Vec::new();
     for (i, val) in d.slots.iter().enumerate() {
@@ -67,11 +72,18 @@ pub(super) fn capture_snapshot(guid: &str) -> Result<String, String> {
         };
         lines.push(format!("slot_{i}={label}"));
     }
-    let premix = read_child_apo_guid(guid, ChildApoKind::PreMix).map(|g| format!("{g:?}")).unwrap_or_default();
-    let postmix = read_child_apo_guid(guid, ChildApoKind::PostMix).map(|g| format!("{g:?}")).unwrap_or_default();
+    let premix = read_child_apo_guid(guid, ChildApoKind::PreMix)
+        .map(|g| format!("{g:?}"))
+        .unwrap_or_default();
+    let postmix = read_child_apo_guid(guid, ChildApoKind::PostMix)
+        .map(|g| format!("{g:?}"))
+        .unwrap_or_default();
     lines.push(format!("childPreMix={premix}"));
     lines.push(format!("childPostMix={postmix}"));
-    lines.push(format!("childApoKeyExists={}", vxapo_driver::child_apo_key_exists(guid)));
+    lines.push(format!(
+        "childApoKeyExists={}",
+        vxapo_driver::child_apo_key_exists(guid)
+    ));
     Ok(lines.join("\n"))
 }
 
@@ -90,7 +102,10 @@ struct SnapshotDiff {
 fn diff_snapshots(baseline: &str, current: &str) -> SnapshotDiff {
     let parse = |text: &str| -> Vec<(String, String)> {
         text.lines()
-            .filter_map(|l| l.split_once('=').map(|(k, v)| (k.to_string(), v.to_string())))
+            .filter_map(|l| {
+                l.split_once('=')
+                    .map(|(k, v)| (k.to_string(), v.to_string()))
+            })
             .collect()
     };
     let b_lines = parse(baseline);
@@ -106,11 +121,13 @@ fn diff_snapshots(baseline: &str, current: &str) -> SnapshotDiff {
         match b_lines.iter().find(|(bk, _)| bk == k) {
             Some((_, bv)) if bv == v => {
                 diff.same += 1;
-                diff.entries.push((k.clone(), Some(bv.clone()), Some(v.clone())));
+                diff.entries
+                    .push((k.clone(), Some(bv.clone()), Some(v.clone())));
             }
             Some((_, bv)) => {
                 diff.mods += 1;
-                diff.entries.push((k.clone(), Some(bv.clone()), Some(v.clone())));
+                diff.entries
+                    .push((k.clone(), Some(bv.clone()), Some(v.clone())));
             }
             None => {
                 diff.adds += 1;
@@ -155,7 +172,11 @@ pub fn snapshot_diff(guid: &str) -> Result<String, String> {
         }
     }
     let SnapshotDiff {
-        adds, dels, mods, same, ..
+        adds,
+        dels,
+        mods,
+        same,
+        ..
     } = diff;
     if lang() == Lang::En {
         Ok(format!(
@@ -223,4 +244,3 @@ pub fn snapshot_restore(guid: &str) -> Result<(), String> {
     }
     Ok(())
 }
-

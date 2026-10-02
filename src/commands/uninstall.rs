@@ -1,7 +1,7 @@
 //! commands/uninstall.rs — 卸载编排
 
-use super::*;
 use super::snapshot::*;
+use super::*;
 
 /// uninstall 命令（CLI 引用规范 5.3）。
 pub fn uninstall(device_ref: &str, json: bool) -> Result<(), String> {
@@ -11,10 +11,7 @@ pub fn uninstall(device_ref: &str, json: bool) -> Result<(), String> {
     // 直接走残留清理，避免 find_endpoint_path 失败后留下 Child APOs / 配置目录。
     if find_endpoint_path(&dev.guid).is_err() {
         let stale = list_stale_installs().map_err(|e| e.to_string())?;
-        if stale
-            .iter()
-            .any(|s| s.guid.eq_ignore_ascii_case(&dev.guid))
-        {
+        if stale.iter().any(|s| s.guid.eq_ignore_ascii_case(&dev.guid)) {
             return stale_cleanup(&dev.guid, json);
         }
     }
@@ -52,10 +49,15 @@ pub fn uninstall(device_ref: &str, json: bool) -> Result<(), String> {
             if lang() == Lang::En {
                 println!("  audiodg exited ({} ms)", wait_start.elapsed().as_millis());
             } else {
-                println!("  audiodg 已退出（{} ms）", wait_start.elapsed().as_millis());
+                println!(
+                    "  audiodg 已退出（{} ms）",
+                    wait_start.elapsed().as_millis()
+                );
             }
         } else if lang() == Lang::En {
-            println!("  ⚠ timed out waiting for audiodg exit (5 s); continuing (slot edit unaffected)");
+            println!(
+                "  ⚠ timed out waiting for audiodg exit (5 s); continuing (slot edit unaffected)"
+            );
         } else {
             println!("  ⚠ 等待 audiodg 退出超时（5 s），继续执行（槽位写入不受影响）");
         }
@@ -75,19 +77,27 @@ pub fn uninstall(device_ref: &str, json: bool) -> Result<(), String> {
     // 卸载后回读验证：5 槽位中不应残留 VxAPO CLSID。
     let residual = enumerate_devices()
         .map_err(|e| {
-        if lang() == Lang::En {
-            format!("Failed to re-enumerate devices: {e}")
-        } else {
-            format!("回读枚举失败：{e}")
-        }
-    })?
+            if lang() == Lang::En {
+                format!("Failed to re-enumerate devices: {e}")
+            } else {
+                format!("回读枚举失败：{e}")
+            }
+        })?
         .iter()
-        .find(|d| d.endpoint.as_ref().map(|e| e.endpoint_guid.eq_ignore_ascii_case(&dev.guid)).unwrap_or(false))
+        .find(|d| {
+            d.endpoint
+                .as_ref()
+                .map(|e| e.endpoint_guid.eq_ignore_ascii_case(&dev.guid))
+                .unwrap_or(false)
+        })
         .map(|d| {
-            d.slots.iter().filter(|s| {
-                matches!(s, vxapo_driver::SlotValue::Guid(g)
+            d.slots
+                .iter()
+                .filter(|s| {
+                    matches!(s, vxapo_driver::SlotValue::Guid(g)
                     if *g == CLSID_VXAPO_PRE_MIX || *g == CLSID_VXAPO_POST_MIX)
-            }).count()
+                })
+                .count()
         })
         .unwrap_or(0);
     if residual > 0 {
@@ -95,7 +105,9 @@ pub fn uninstall(device_ref: &str, json: bool) -> Result<(), String> {
         if lang() == Lang::En {
             return Err(format!("Detected {residual} slot(s) still containing VxAPO CLSID after uninstall - audio process may still be holding them. Please retry."));
         } else {
-            return Err(format!("卸载后检测到 {residual} 个槽位残留 VxAPO CLSID——音频进程可能仍占用，请重试。"));
+            return Err(format!(
+                "卸载后检测到 {residual} 个槽位残留 VxAPO CLSID——音频进程可能仍占用，请重试。"
+            ));
         }
     }
 
@@ -124,4 +136,3 @@ pub fn uninstall(device_ref: &str, json: bool) -> Result<(), String> {
 
     Ok(())
 }
-

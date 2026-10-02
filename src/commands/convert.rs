@@ -5,8 +5,7 @@ use super::*;
 /// config set（CLI 引用规范 5.2）：源文件内容原样写入 per-device config.toml。
 pub fn config_set(device_ref: &str, file: &str) -> Result<(), String> {
     let dev = resolve_device(device_ref)?;
-    let src = std::fs::read_to_string(file)
-        .map_err(|e| {
+    let src = std::fs::read_to_string(file).map_err(|e| {
         if lang() == Lang::En {
             format!("Failed to read source file {file}: {e}")
         } else {
@@ -16,12 +15,12 @@ pub fn config_set(device_ref: &str, file: &str) -> Result<(), String> {
     let path = device_config_path(&dev.guid);
     if let Some(parent) = Path::new(&path).parent() {
         std::fs::create_dir_all(parent).map_err(|e| {
-        if lang() == Lang::En {
-            format!("Failed to create config directory: {e}")
-        } else {
-            format!("创建配置目录失败：{e}")
-        }
-    })?;
+            if lang() == Lang::En {
+                format!("Failed to create config directory: {e}")
+            } else {
+                format!("创建配置目录失败：{e}")
+            }
+        })?;
     }
     std::fs::write(&path, &src).map_err(|e| {
         if lang() == Lang::En {
@@ -31,7 +30,10 @@ pub fn config_set(device_ref: &str, file: &str) -> Result<(), String> {
         }
     })?;
     if lang() == Lang::En {
-        println!("✓ Config written ({} bytes), validating syntax...", src.len());
+        println!(
+            "✓ Config written ({} bytes), validating syntax...",
+            src.len()
+        );
     } else {
         println!("✓ config 已写入（{} 字节），语法验证中…", src.len());
     }
@@ -49,7 +51,9 @@ pub fn config_show(device_ref: &str) -> Result<(), String> {
             if lang() == Lang::En {
                 return Err("Not configured: config.toml does not exist (use config set -f <file> to write it)".to_string());
             } else {
-                return Err("未配置：config.toml 不存在（可用 config set -f <file> 写入）".to_string());
+                return Err(
+                    "未配置：config.toml 不存在（可用 config set -f <file> 写入）".to_string(),
+                );
             }
         }
     };
@@ -77,12 +81,9 @@ pub fn config_convert(src: &str, out: Option<&str>) -> Result<(), String> {
         }
     })?;
     let toml = convert_txt_to_toml(&text)?;
-    let out_path = out.map(|s| s.to_string()).unwrap_or_else(|| {
-        Path::new(src)
-            .with_extension("toml")
-            .display()
-            .to_string()
-    });
+    let out_path = out
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| Path::new(src).with_extension("toml").display().to_string());
     std::fs::write(&out_path, &toml).map_err(|e| {
         if lang() == Lang::En {
             format!("Failed to write {out_path}: {e}")
@@ -109,10 +110,10 @@ pub(super) fn convert_txt_to_toml(text: &str) -> Result<String, String> {
         }
         let Some((cmd, rest)) = line.split_once(':') else {
             if lang() == Lang::En {
-            println!("⚠ Skipping unrecognized line: {line}");
-        } else {
-            println!("⚠ 跳过无法识别的行：{line}");
-        }
+                println!("⚠ Skipping unrecognized line: {line}");
+            } else {
+                println!("⚠ 跳过无法识别的行：{line}");
+            }
             continue;
         };
         let cmd = cmd.trim();
@@ -121,10 +122,10 @@ pub(super) fn convert_txt_to_toml(text: &str) -> Result<String, String> {
             "graphiceq" => {
                 if rest.is_empty() {
                     if lang() == Lang::En {
-                    println!("⚠ GraphicEQ: empty parameters skipped");
-                } else {
-                    println!("⚠ GraphicEQ: 空参数跳过");
-                }
+                        println!("⚠ GraphicEQ: empty parameters skipped");
+                    } else {
+                        println!("⚠ GraphicEQ: 空参数跳过");
+                    }
                     continue;
                 }
                 let mut bands = Vec::new();
@@ -137,12 +138,12 @@ pub(super) fn convert_txt_to_toml(text: &str) -> Result<String, String> {
                     let (f, g) = match (it.next(), it.next()) {
                         (Some(f), Some(g)) => (f, g),
                         _ => {
-                        if lang() == Lang::En {
-                            return Err(format!("Invalid GraphicEQ segment: '{seg}'"));
-                        } else {
-                            return Err(format!("GraphicEQ 段无效：'{seg}'"));
+                            if lang() == Lang::En {
+                                return Err(format!("Invalid GraphicEQ segment: '{seg}'"));
+                            } else {
+                                return Err(format!("GraphicEQ 段无效：'{seg}'"));
+                            }
                         }
-                    }
                     };
                     let f: f32 = f
                         .replace(',', ".")
@@ -173,7 +174,9 @@ pub(super) fn convert_txt_to_toml(text: &str) -> Result<String, String> {
                     .split_whitespace()
                     .next()
                     .ok_or_else(|| "Preamp 参数无效".to_string())?;
-                out.push_str(&format!("[[effects]]\ntype = \"preamp\"\ngain_db = {db}\n\n"));
+                out.push_str(&format!(
+                    "[[effects]]\ntype = \"preamp\"\ngain_db = {db}\n\n"
+                ));
             }
             "wide" => {
                 let kv = parse_kv(rest)?;
@@ -234,11 +237,7 @@ pub(super) fn convert_txt_to_toml(text: &str) -> Result<String, String> {
                 write_mapped(
                     &mut out,
                     &kv,
-                    &[
-                        ("release", "release_ms"),
-                        ("wet", "wet"),
-                        ("dry", "dry"),
-                    ],
+                    &[("release", "release_ms"), ("wet", "wet"), ("dry", "dry")],
                 );
                 out.push('\n');
                 if ["gainboost", "maxoutput", "target", "lookahead", "dither"]
@@ -254,19 +253,23 @@ pub(super) fn convert_txt_to_toml(text: &str) -> Result<String, String> {
             }
             "loudnesscorrection" => {
                 let mut it = rest.split_whitespace();
-                let phon = it.next().ok_or_else(|| "LoudnessCorrection 缺少 phon".to_string())?;
+                let phon = it
+                    .next()
+                    .ok_or_else(|| "LoudnessCorrection 缺少 phon".to_string())?;
                 let reference = it.next().unwrap_or("80");
                 out.push_str(&format!(
                     "[[effects]]\ntype = \"loudness\"\nphon = {phon}\nreference_phon = {reference}\n\n"
                 ));
             }
             other => {
-                    if lang() == Lang::En {
-                        println!("⚠ Command {other}: no longer supported, skipped (please migrate manually)");
-                    } else {
-                        println!("⚠ 命令 {other}: 不再支持，跳过（请手动迁移）");
-                    }
+                if lang() == Lang::En {
+                    println!(
+                        "⚠ Command {other}: no longer supported, skipped (please migrate manually)"
+                    );
+                } else {
+                    println!("⚠ 命令 {other}: 不再支持，跳过（请手动迁移）");
                 }
+            }
         }
     }
     Ok(out)
@@ -284,10 +287,11 @@ pub(super) fn parse_kv(rest: &str) -> Result<std::collections::HashMap<String, S
         };
         i += 2;
         map.insert(key, val.to_string());
-        if toks
-            .get(i)
-            .is_some_and(|t| t.eq_ignore_ascii_case("hz") || t.eq_ignore_ascii_case("db") || t.eq_ignore_ascii_case("ms"))
-        {
+        if toks.get(i).is_some_and(|t| {
+            t.eq_ignore_ascii_case("hz")
+                || t.eq_ignore_ascii_case("db")
+                || t.eq_ignore_ascii_case("ms")
+        }) {
             i += 1;
         }
     }

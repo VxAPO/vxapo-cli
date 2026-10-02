@@ -7,7 +7,8 @@ use crate::knowledge;
 use crate::reg;
 
 const PATH_RENDER: &str = "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\MMDevices\\Audio\\Render";
-const PATH_CAPTURE: &str = "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\MMDevices\\Audio\\Capture";
+const PATH_CAPTURE: &str =
+    "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\MMDevices\\Audio\\Capture";
 
 pub fn dump_endpoint(ep: &Endpoint) {
     let base = match ep.kind {
@@ -25,7 +26,8 @@ pub fn dump_endpoint(ep: &Endpoint) {
     }
 
     // Properties
-    if let Ok(props) = hklm.open_subkey_with_flags(&format!("{device_path}\\Properties"), KEY_READ) {
+    if let Ok(props) = hklm.open_subkey_with_flags(&format!("{device_path}\\Properties"), KEY_READ)
+    {
         println!("  ── Properties ──");
         let mut seen = HashSet::new();
         dump_key_inner(&props, "  ", true, &mut seen);
@@ -65,7 +67,12 @@ fn dump_key_inner(key: &RegKey, indent: &str, filter: bool, seen: &mut HashSet<S
             }
             REG_DWORD => {
                 if val.bytes.len() >= 4 {
-                    let d = u32::from_le_bytes([val.bytes[0], val.bytes[1], val.bytes[2], val.bytes[3]]);
+                    let d = u32::from_le_bytes([
+                        val.bytes[0],
+                        val.bytes[1],
+                        val.bytes[2],
+                        val.bytes[3],
+                    ]);
                     let extra = knowledge::decode_dword_label(&name, d);
                     println!("{indent}[DW]  {display_name:<40} = 0x{d:08x}{extra}");
                 }
@@ -75,13 +82,25 @@ fn dump_key_inner(key: &RegKey, indent: &str, filter: bool, seen: &mut HashSet<S
                     if let Some(s) = reg::parse_prop_string(&val.bytes) {
                         println!("{indent}[BIN] {display_name:<40} = {s}");
                     } else {
-                        println!("{indent}[BIN] {display_name:<40} = {} bytes", val.bytes.len());
+                        println!(
+                            "{indent}[BIN] {display_name:<40} = {} bytes",
+                            val.bytes.len()
+                        );
                     }
                 } else if filter {
                     continue;
                 } else {
-                    let preview: Vec<String> = val.bytes.iter().take(8).map(|b| format!("{b:02x}")).collect();
-                    println!("{indent}[BIN] {display_name:<40} = [{}...] ({} bytes)", preview.join(" "), val.bytes.len());
+                    let preview: Vec<String> = val
+                        .bytes
+                        .iter()
+                        .take(8)
+                        .map(|b| format!("{b:02x}"))
+                        .collect();
+                    println!(
+                        "{indent}[BIN] {display_name:<40} = [{}...] ({} bytes)",
+                        preview.join(" "),
+                        val.bytes.len()
+                    );
                 }
             }
             REG_MULTI_SZ => {
@@ -92,15 +111,24 @@ fn dump_key_inner(key: &RegKey, indent: &str, filter: bool, seen: &mut HashSet<S
             REG_QWORD => {
                 if val.bytes.len() >= 8 {
                     let q = u64::from_le_bytes([
-                        val.bytes[0], val.bytes[1], val.bytes[2], val.bytes[3],
-                        val.bytes[4], val.bytes[5], val.bytes[6], val.bytes[7],
+                        val.bytes[0],
+                        val.bytes[1],
+                        val.bytes[2],
+                        val.bytes[3],
+                        val.bytes[4],
+                        val.bytes[5],
+                        val.bytes[6],
+                        val.bytes[7],
                     ]);
                     println!("{indent}[QW]  {display_name:<40} = 0x{q:016x} ({q})");
                 }
             }
             other => {
                 if !filter {
-                    println!("{indent}[??]  {display_name:<40} = ({other:?}, {} bytes)", val.bytes.len());
+                    println!(
+                        "{indent}[??]  {display_name:<40} = ({other:?}, {} bytes)",
+                        val.bytes.len()
+                    );
                 }
             }
         }

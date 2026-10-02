@@ -1,9 +1,9 @@
 //! commands/install.rs — 安装编排（含旧 GUID 残留处理）
 
-use super::*;
 use super::register::*;
 use super::snapshot::*;
 use super::status::*;
+use super::*;
 
 /// 安装前预览：设备 + 5 槽位占用摘要（交互菜单安装前展示）。
 ///
@@ -20,7 +20,12 @@ pub fn preview_install(device_ref: &str) -> Result<String, String> {
     })?;
     let d = devices
         .iter()
-        .find(|d| d.endpoint.as_ref().map(|e| e.endpoint_guid.eq_ignore_ascii_case(&dev.guid)).unwrap_or(false))
+        .find(|d| {
+            d.endpoint
+                .as_ref()
+                .map(|e| e.endpoint_guid.eq_ignore_ascii_case(&dev.guid))
+                .unwrap_or(false)
+        })
         .ok_or_else(|| {
             if lang() == Lang::En {
                 "Device not in enumeration list".to_string()
@@ -70,18 +75,17 @@ pub fn install(
                 "sfxmfx" => vxapo_driver::InstallMode::SfxMfx,
                 "sfxefx" => vxapo_driver::InstallMode::SfxEfx,
                 _ => {
-                        if lang() == Lang::En {
-                            return Err(format!("Invalid mode: {m} (LfxGfx/SfxMfx/SfxEfx)"));
-                        } else {
-                            return Err(format!("无效模式：{m}（LfxGfx/SfxMfx/SfxEfx）"));
-                        }
+                    if lang() == Lang::En {
+                        return Err(format!("Invalid mode: {m} (LfxGfx/SfxMfx/SfxEfx)"));
+                    } else {
+                        return Err(format!("无效模式：{m}（LfxGfx/SfxMfx/SfxEfx）"));
                     }
+                }
             };
         }
         // 缺省：自动探测（EAPO 三档，driver detect_mode_for_guid）。
         None => {
-            config.install_mode =
-                vxapo_driver::detect_mode_for_guid(&dev.guid);
+            config.install_mode = vxapo_driver::detect_mode_for_guid(&dev.guid);
             if !json {
                 if lang() == Lang::En {
                     println!("▶ Auto-detected install mode: {:?}", config.install_mode);
@@ -99,10 +103,10 @@ pub fn install(
     if let Err(e) = snapshot_device(&dev.guid, true) {
         if !json {
             if lang() == Lang::En {
-                    println!("⚠ Snapshot creation failed (continuing): {e}");
-                } else {
-                    println!("⚠ 快照建立失败（继续安装）：{e}");
-                }
+                println!("⚠ Snapshot creation failed (continuing): {e}");
+            } else {
+                println!("⚠ 快照建立失败（继续安装）：{e}");
+            }
         }
     }
 
@@ -139,9 +143,15 @@ pub fn install(
             );
         } else {
             if lang() == Lang::En {
-                println!("✓ Installed {} (mode {:?}, child APO keep={})", dev.guid, config.install_mode, !no_child);
+                println!(
+                    "✓ Installed {} (mode {:?}, child APO keep={})",
+                    dev.guid, config.install_mode, !no_child
+                );
             } else {
-                println!("✓ 已安装 {}（模式 {:?}，子 APO 保留={}）", dev.guid, config.install_mode, !no_child);
+                println!(
+                    "✓ 已安装 {}（模式 {:?}，子 APO 保留={}）",
+                    dev.guid, config.install_mode, !no_child
+                );
             }
         }
 
@@ -184,9 +194,17 @@ pub(super) fn ensure_default_config(dev: &DeviceRef, json: bool) {
                             Ok(()) => {
                                 if !json {
                                     if lang() == Lang::En {
-                                        println!("📄 Auto-imported {} -> {}", default_src.display(), path);
+                                        println!(
+                                            "📄 Auto-imported {} -> {}",
+                                            default_src.display(),
+                                            path
+                                        );
                                     } else {
-                                        println!("📄 已自动导入 {} → {}", default_src.display(), path);
+                                        println!(
+                                            "📄 已自动导入 {} → {}",
+                                            default_src.display(),
+                                            path
+                                        );
                                     }
                                 }
                             }
@@ -213,7 +231,9 @@ pub(super) fn ensure_default_config(dev: &DeviceRef, json: bool) {
                 }
             } else if !json {
                 if lang() == Lang::En {
-                    println!("⚠ No config.toml detected ({path}); APO will run without configuration.");
+                    println!(
+                        "⚠ No config.toml detected ({path}); APO will run without configuration."
+                    );
                     println!("   Use: vxapo-cli config set -d <device> -f <your config file>");
                 } else {
                     println!("⚠ 未检测到 config.toml（{path}），APO 将按无配置运行。");
@@ -282,19 +302,15 @@ pub fn stale_migrate(
     // 上删除槽位值同样成功。因此这里既不 stop AudioSrv 也不 taskkill audiodg；
     // 修复分支若真的改写了槽位，由 driver 在写完后**重启端点**让变更生效
     // （引擎会缓存端点 APO 链，只改注册表不会立刻重载）。
-    let report = migrate_install(from, to, config_from, snapshot_from).map_err(|e| e.to_string())?;
+    let report =
+        migrate_install(from, to, config_from, snapshot_from).map_err(|e| e.to_string())?;
     if json {
         println!(
             "{}",
             serde_json::to_string(&contract_report(&report)).map_err(|e| e.to_string())?
         );
     } else {
-        println!(
-            "{} {} -> {}",
-            tr("✓ 已迁移", "✓ migrated"),
-            from,
-            to
-        );
+        println!("{} {} -> {}", tr("✓ 已迁移", "✓ migrated"), from, to);
         if !report.warnings.is_empty() {
             for w in report.warnings {
                 eprintln!("⚠ {w}");

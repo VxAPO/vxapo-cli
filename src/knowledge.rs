@@ -10,31 +10,181 @@ pub struct PropertyMeta {
 
 pub static KNOWN_PROPERTIES: LazyLock<HashMap<&'static str, PropertyMeta>> = LazyLock::new(|| {
     let mut m = HashMap::new();
-    m.insert("{a45c254e-df1c-4efd-8020-67d146a850e0},2",  PropertyMeta { name: "ConnectionName",      description: "" });
-    m.insert("{b3f8fa53-0004-438e-9003-51a46e139bfc},6",  PropertyMeta { name: "DeviceName",           description: "" });
-    m.insert("{b3f8fa53-0004-438e-9003-51a46e139bfc},2",  PropertyMeta { name: "DeviceDesc",           description: "" });
-    m.insert("{b3f8fa53-0004-438e-9003-51a46e139bfc},0",  PropertyMeta { name: "DeviceState",          description: "" });
-    m.insert("{b3f8fa53-0004-438e-9003-51a46e139bfc},3",  PropertyMeta { name: "FormFactor",           description: "" });
-    m.insert("{b3f8fa53-0004-438e-9003-51a46e139bfc},4",  PropertyMeta { name: "CompositorID",         description: "" });
-    m.insert("{b3f8fa53-0004-438e-9003-51a46e139bfc},9",  PropertyMeta { name: "AudioEndpoint_Flags",  description: "" });
-    m.insert("{b3f8fa53-0004-438e-9003-51a46e139bfc},3",  PropertyMeta { name: "EP_FormFactor",        description: "" });
-    m.insert("{1da5d803-d492-4edd-8c23-e0c0ffee7f0e},3",  PropertyMeta { name: "ChannelMask",          description: "" });
-    m.insert("{1da5d803-d492-4edd-8c23-e0c0ffee7f0e},5",  PropertyMeta { name: "DisableEnhancements",  description: "" });
-    m.insert("{f19f064d-082c-4e27-bc73-6882a1bb8e4c},0",  PropertyMeta { name: "AudioFormat",          description: "" });
-    m.insert("{80f111c3-b103-42e1-afb6-db7a6fa8be1f},0",  PropertyMeta { name: "DeviceHWId",           description: "" });
-    m.insert("{a45c254e-df1c-4efd-8020-67d146a850e0},24", PropertyMeta { name: "DeviceInterface",      description: "" });
-    m.insert("{9c119480-ddc2-4954-a150-5bd240d454ad},1",  PropertyMeta { name: "DeviceInterfacePath",  description: "" });
-    m.insert("{9c119480-ddc2-4954-a150-5bd240d454ad},2",  PropertyMeta { name: "DeviceInstanceId",     description: "" });
-    m.insert("{233164c8-1b2c-4c7d-bc68-b671687a2567},1",  PropertyMeta { name: "DeviceInterface",      description: "" });
-    m.insert("{d04e05a6-594b-4fb6-a80d-01af5eed7d1d},1",  PropertyMeta { name: "LFX_APO",              description: "" });
-    m.insert("{d04e05a6-594b-4fb6-a80d-01af5eed7d1d},2",  PropertyMeta { name: "GFX_APO",              description: "" });
-    m.insert("{d04e05a6-594b-4fb6-a80d-01af5eed7d1d},5",  PropertyMeta { name: "SFX_APO",              description: "" });
-    m.insert("{d04e05a6-594b-4fb6-a80d-01af5eed7d1d},6",  PropertyMeta { name: "MFX_APO",              description: "" });
-    m.insert("{d04e05a6-594b-4fb6-a80d-01af5eed7d1d},7",  PropertyMeta { name: "EFX_APO",              description: "" });
-    m.insert("{1da5d803-d492-4edd-8c23-e0c0ffee7f0e},2",  PropertyMeta { name: "EndpointGUID",         description: "" });
-    m.insert("{1da5d803-d492-4edd-8c23-e0c0ffee7f0e},7",  PropertyMeta { name: "FullRangeSpeakers",    description: "" });
-    m.insert("{1da5d803-d492-4edd-8c23-e0c0ffee7f0e},8",  PropertyMeta { name: "DeviceClassGuid",      description: "" });
-    m.insert("{b3f8fa53-0004-438e-9003-51a46e139bfc},32", PropertyMeta { name: "EngineDeviceFormat",   description: "" });
+    m.insert(
+        "{a45c254e-df1c-4efd-8020-67d146a850e0},2",
+        PropertyMeta {
+            name: "ConnectionName",
+            description: "",
+        },
+    );
+    m.insert(
+        "{b3f8fa53-0004-438e-9003-51a46e139bfc},6",
+        PropertyMeta {
+            name: "DeviceName",
+            description: "",
+        },
+    );
+    m.insert(
+        "{b3f8fa53-0004-438e-9003-51a46e139bfc},2",
+        PropertyMeta {
+            name: "DeviceDesc",
+            description: "",
+        },
+    );
+    m.insert(
+        "{b3f8fa53-0004-438e-9003-51a46e139bfc},0",
+        PropertyMeta {
+            name: "DeviceState",
+            description: "",
+        },
+    );
+    m.insert(
+        "{b3f8fa53-0004-438e-9003-51a46e139bfc},3",
+        PropertyMeta {
+            name: "FormFactor",
+            description: "",
+        },
+    );
+    m.insert(
+        "{b3f8fa53-0004-438e-9003-51a46e139bfc},4",
+        PropertyMeta {
+            name: "CompositorID",
+            description: "",
+        },
+    );
+    m.insert(
+        "{b3f8fa53-0004-438e-9003-51a46e139bfc},9",
+        PropertyMeta {
+            name: "AudioEndpoint_Flags",
+            description: "",
+        },
+    );
+    m.insert(
+        "{b3f8fa53-0004-438e-9003-51a46e139bfc},3",
+        PropertyMeta {
+            name: "EP_FormFactor",
+            description: "",
+        },
+    );
+    m.insert(
+        "{1da5d803-d492-4edd-8c23-e0c0ffee7f0e},3",
+        PropertyMeta {
+            name: "ChannelMask",
+            description: "",
+        },
+    );
+    m.insert(
+        "{1da5d803-d492-4edd-8c23-e0c0ffee7f0e},5",
+        PropertyMeta {
+            name: "DisableEnhancements",
+            description: "",
+        },
+    );
+    m.insert(
+        "{f19f064d-082c-4e27-bc73-6882a1bb8e4c},0",
+        PropertyMeta {
+            name: "AudioFormat",
+            description: "",
+        },
+    );
+    m.insert(
+        "{80f111c3-b103-42e1-afb6-db7a6fa8be1f},0",
+        PropertyMeta {
+            name: "DeviceHWId",
+            description: "",
+        },
+    );
+    m.insert(
+        "{a45c254e-df1c-4efd-8020-67d146a850e0},24",
+        PropertyMeta {
+            name: "DeviceInterface",
+            description: "",
+        },
+    );
+    m.insert(
+        "{9c119480-ddc2-4954-a150-5bd240d454ad},1",
+        PropertyMeta {
+            name: "DeviceInterfacePath",
+            description: "",
+        },
+    );
+    m.insert(
+        "{9c119480-ddc2-4954-a150-5bd240d454ad},2",
+        PropertyMeta {
+            name: "DeviceInstanceId",
+            description: "",
+        },
+    );
+    m.insert(
+        "{233164c8-1b2c-4c7d-bc68-b671687a2567},1",
+        PropertyMeta {
+            name: "DeviceInterface",
+            description: "",
+        },
+    );
+    m.insert(
+        "{d04e05a6-594b-4fb6-a80d-01af5eed7d1d},1",
+        PropertyMeta {
+            name: "LFX_APO",
+            description: "",
+        },
+    );
+    m.insert(
+        "{d04e05a6-594b-4fb6-a80d-01af5eed7d1d},2",
+        PropertyMeta {
+            name: "GFX_APO",
+            description: "",
+        },
+    );
+    m.insert(
+        "{d04e05a6-594b-4fb6-a80d-01af5eed7d1d},5",
+        PropertyMeta {
+            name: "SFX_APO",
+            description: "",
+        },
+    );
+    m.insert(
+        "{d04e05a6-594b-4fb6-a80d-01af5eed7d1d},6",
+        PropertyMeta {
+            name: "MFX_APO",
+            description: "",
+        },
+    );
+    m.insert(
+        "{d04e05a6-594b-4fb6-a80d-01af5eed7d1d},7",
+        PropertyMeta {
+            name: "EFX_APO",
+            description: "",
+        },
+    );
+    m.insert(
+        "{1da5d803-d492-4edd-8c23-e0c0ffee7f0e},2",
+        PropertyMeta {
+            name: "EndpointGUID",
+            description: "",
+        },
+    );
+    m.insert(
+        "{1da5d803-d492-4edd-8c23-e0c0ffee7f0e},7",
+        PropertyMeta {
+            name: "FullRangeSpeakers",
+            description: "",
+        },
+    );
+    m.insert(
+        "{1da5d803-d492-4edd-8c23-e0c0ffee7f0e},8",
+        PropertyMeta {
+            name: "DeviceClassGuid",
+            description: "",
+        },
+    );
+    m.insert(
+        "{b3f8fa53-0004-438e-9003-51a46e139bfc},32",
+        PropertyMeta {
+            name: "EngineDeviceFormat",
+            description: "",
+        },
+    );
     m
 });
 
@@ -152,10 +302,18 @@ pub fn decode_dword_label(name: &str, value: u32) -> String {
         };
     }
     if name == "{1da5d803-d492-4edd-8c23-e0c0ffee7f0e},7" {
-        return if value == 1 { " (Yes)".to_string() } else { String::new() };
+        return if value == 1 {
+            " (Yes)".to_string()
+        } else {
+            String::new()
+        };
     }
     if name == "{b3f8fa53-0004-438e-9003-51a46e139bfc},32" {
-        return if value == 0 { " (default/not set)".to_string() } else { String::new() };
+        return if value == 0 {
+            " (default/not set)".to_string()
+        } else {
+            String::new()
+        };
     }
     String::new()
 }

@@ -13,7 +13,11 @@ pub const GRAY: &str = "\x1b[90m";
 pub fn print_endpoints(endpoints: &[Endpoint]) {
     println!("\n{BOLD}Found {} endpoints:{RESET}\n", endpoints.len());
     for ep in endpoints {
-        let kind_color = if ep.kind == crate::endpoint::EndpointKind::Playback { CYAN } else { GREEN };
+        let kind_color = if ep.kind == crate::endpoint::EndpointKind::Playback {
+            CYAN
+        } else {
+            GREEN
+        };
         let kind_display = format!("{GRAY}({kind_color}{}{GRAY}){RESET}", ep.kind);
         let (apo_text, apo_color) = classify_apo(ep);
 
@@ -43,9 +47,15 @@ fn classify_apo(ep: &Endpoint) -> (String, &'static str) {
     }
 
     let mut parts = Vec::new();
-    if sfx.is_some() { parts.push("SFX"); }
-    if mfx.is_some() { parts.push("MFX"); }
-    if efx.is_some() { parts.push("EFX"); }
+    if sfx.is_some() {
+        parts.push("SFX");
+    }
+    if mfx.is_some() {
+        parts.push("MFX");
+    }
+    if efx.is_some() {
+        parts.push("EFX");
+    }
 
     let label = if parts.is_empty() {
         "[Windows default]".to_string()
@@ -65,18 +75,27 @@ fn classify_apo(ep: &Endpoint) -> (String, &'static str) {
 }
 
 pub fn print_detail_header(ep: &Endpoint) {
-    let kind_color = if ep.kind == crate::endpoint::EndpointKind::Playback { CYAN } else { GREEN };
+    let kind_color = if ep.kind == crate::endpoint::EndpointKind::Playback {
+        CYAN
+    } else {
+        GREEN
+    };
     println!("\n{BOLD}========================================{RESET}");
     println!(" {BOLD}{}{RESET}", ep.name);
     println!("{BOLD}========================================{RESET}");
     println!("  Index:    {BOLD}{}{RESET}", ep.index);
     println!("  GUID:     {GRAY}{}{RESET}", ep.guid);
     println!("  Type:     {kind_color}{}{RESET}", ep.kind);
-    println!("  Path:     {GRAY}HKLM\\...\\Audio\\{}\\{}{RESET}", ep.kind.reg_path(), ep.guid);
+    println!(
+        "  Path:     {GRAY}HKLM\\...\\Audio\\{}\\{}{RESET}",
+        ep.kind.reg_path(),
+        ep.guid
+    );
 
     if let (Some(sr), Some(ch), Some(bd)) = (ep.sample_rate, ep.channels, ep.bit_depth) {
         if sr > 0 && ch > 0 && bd > 0 {
-            let mask_str = ep.channel_mask
+            let mask_str = ep
+                .channel_mask
                 .map(|m| format!("0x{m:08x}"))
                 .unwrap_or_else(|| "none".to_string());
             println!("  Audio:    {sr} Hz, {ch}ch, {bd}bit, mask={mask_str}");
@@ -104,17 +123,29 @@ pub fn print_detail_header(ep: &Endpoint) {
 
     match ep.endpoint_flags {
         Some(flags) => {
-            let sysfx = if flags & 0x01 != 0 { format!("{RED}DISABLED{RESET}") }
-                        else { format!("{GREEN}ENABLED{RESET}") };
-            println!("  SysFX:    {sysfx} {GRAY}(AudioEndpoint_Flags=0x{flags:02x}, bit0={}){RESET}", flags & 1);
+            let sysfx = if flags & 0x01 != 0 {
+                format!("{RED}DISABLED{RESET}")
+            } else {
+                format!("{GREEN}ENABLED{RESET}")
+            };
+            println!(
+                "  SysFX:    {sysfx} {GRAY}(AudioEndpoint_Flags=0x{flags:02x}, bit0={}){RESET}",
+                flags & 1
+            );
         }
         None => println!("  SysFX:    {GRAY}(not set){RESET}"),
     }
 
     match ep.disable_enhancements {
-        Some(0) | None => println!("  Enhancements: {GREEN}ENABLED{RESET} {GRAY}(DisableEnhancements not set){RESET}"),
-        Some(1)       => println!("  Enhancements: {RED}DISABLED{RESET} {GRAY}(DisableEnhancements=1){RESET}"),
-        Some(v)       => println!("  Enhancements: {YELLOW}UNKNOWN{RESET} {GRAY}(DisableEnhancements={v}){RESET}"),
+        Some(0) | None => println!(
+            "  Enhancements: {GREEN}ENABLED{RESET} {GRAY}(DisableEnhancements not set){RESET}"
+        ),
+        Some(1) => {
+            println!("  Enhancements: {RED}DISABLED{RESET} {GRAY}(DisableEnhancements=1){RESET}")
+        }
+        Some(v) => println!(
+            "  Enhancements: {YELLOW}UNKNOWN{RESET} {GRAY}(DisableEnhancements={v}){RESET}"
+        ),
     }
 
     println!("{BOLD}========================================{RESET}");

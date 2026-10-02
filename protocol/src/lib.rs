@@ -171,7 +171,9 @@ mod tests {
         assert!(!json.contains("eapo"), "{json}");
         assert!(!json.contains("lost_slot"), "{json}");
         assert!(
-            json.contains(r#""slots":{"LFX":"VxAPO PreMix","GFX":null,"SFX":null,"MFX":null,"EFX":null}"#),
+            json.contains(
+                r#""slots":{"LFX":"VxAPO PreMix","GFX":null,"SFX":null,"MFX":null,"EFX":null}"#
+            ),
             "{json}"
         );
         assert!(json.contains(r#""kind":"playback""#), "{json}");
@@ -190,7 +192,10 @@ mod tests {
             CliOk::new("g", "cleaned").to_json(),
             r#"{"ok":true,"device":"g","message":"cleaned"}"#
         );
-        assert_eq!(CliError::new("boom").to_json(), r#"{"ok":false,"error":"boom"}"#);
+        assert_eq!(
+            CliError::new("boom").to_json(),
+            r#"{"ok":false,"error":"boom"}"#
+        );
     }
 
     #[test]
@@ -200,7 +205,6 @@ mod tests {
             r#"{"ok":false,"error":"bad \"x\" \\ path"}"#
         );
     }
-
 
     /// 进度事件的 JSON 形状与 CLI 原手写 `json!` 输出逐字节一致（契约回归）。
     #[test]

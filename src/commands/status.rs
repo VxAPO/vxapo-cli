@@ -17,7 +17,12 @@ pub fn show_device_status(device_ref: &str) -> Result<(), String> {
     })?;
     let d = devices
         .iter()
-        .find(|d| d.endpoint.as_ref().map(|e| e.endpoint_guid.eq_ignore_ascii_case(&dev.guid)).unwrap_or(false))
+        .find(|d| {
+            d.endpoint
+                .as_ref()
+                .map(|e| e.endpoint_guid.eq_ignore_ascii_case(&dev.guid))
+                .unwrap_or(false)
+        })
         .ok_or_else(|| {
             if lang() == Lang::En {
                 "Device not in enumeration list".to_string()
@@ -36,9 +41,15 @@ pub fn show_device_status(device_ref: &str) -> Result<(), String> {
     println!("[{}]", ep.friendly_name);
     println!("  GUID: {}", ep.endpoint_guid);
     if lang() == Lang::En {
-        println!("  Version: {}  Mode: {:?}", d.installed_version, d.install_mode);
+        println!(
+            "  Version: {}  Mode: {:?}",
+            d.installed_version, d.install_mode
+        );
     } else {
-        println!("  版本: {}  模式: {:?}", d.installed_version, d.install_mode);
+        println!(
+            "  版本: {}  模式: {:?}",
+            d.installed_version, d.install_mode
+        );
     }
     // 5 槽位占用（友好名）
     let slot_names = ["LFX", "GFX", "SFX", "MFX", "EFX"];
@@ -85,11 +96,13 @@ pub fn show_device_status(device_ref: &str) -> Result<(), String> {
 /// 没有端点音量查询接口；这里按端点 GUID 直接问 `IAudioEndpointVolume`，仅供
 /// `show_device_status` 的诊断展示，不参与安装/卸载写路径。
 pub(super) fn endpoint_volume(guid: &str) -> Option<f32> {
+    use windows::Win32::Media::Audio::Endpoints::IAudioEndpointVolume;
     use windows::Win32::Media::Audio::{
         EDataFlow, IMMDeviceEnumerator, MMDeviceEnumerator, DEVICE_STATE_ACTIVE,
     };
-    use windows::Win32::Media::Audio::Endpoints::IAudioEndpointVolume;
-    use windows::Win32::System::Com::{CoCreateInstance, CoInitializeEx, CLSCTX_ALL, COINIT_MULTITHREADED};
+    use windows::Win32::System::Com::{
+        CoCreateInstance, CoInitializeEx, CLSCTX_ALL, COINIT_MULTITHREADED,
+    };
 
     unsafe {
         let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
@@ -97,7 +110,9 @@ pub(super) fn endpoint_volume(guid: &str) -> Option<f32> {
             CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL).ok()?;
         let needle = guid.to_ascii_uppercase();
         for flow in [EDataFlow(0), EDataFlow(1)] {
-            let collection = enumerator.EnumAudioEndpoints(flow, DEVICE_STATE_ACTIVE).ok()?;
+            let collection = enumerator
+                .EnumAudioEndpoints(flow, DEVICE_STATE_ACTIVE)
+                .ok()?;
             let count = collection.GetCount().ok()?;
             for i in 0..count {
                 let device = collection.Item(i).ok()?;
@@ -178,7 +193,10 @@ pub fn list_devices(json: bool) -> Result<(), String> {
                 },
             });
         }
-        println!("{}", serde_json::to_string(&out).map_err(|e| e.to_string())?);
+        println!(
+            "{}",
+            serde_json::to_string(&out).map_err(|e| e.to_string())?
+        );
         return Ok(());
     }
     if devices.is_empty() {
@@ -188,15 +206,25 @@ pub fn list_devices(json: bool) -> Result<(), String> {
     for (i, d) in devices.iter().enumerate() {
         let ep = d.endpoint.as_ref();
         let name = ep.map(|e| e.friendly_name.clone()).unwrap_or_else(|| {
-            if lang() == Lang::En { "(unnamed)".to_string() } else { "(未命名)".to_string() }
+            if lang() == Lang::En {
+                "(unnamed)".to_string()
+            } else {
+                "(未命名)".to_string()
+            }
         });
         let guid = ep.map(|e| e.endpoint_guid.clone()).unwrap_or_default();
         println!("[{i}] {name}");
         println!("     GUID: {guid}");
         if lang() == Lang::En {
-            println!("     Version: {}  Mode: {:?}", d.installed_version, d.install_mode);
+            println!(
+                "     Version: {}  Mode: {:?}",
+                d.installed_version, d.install_mode
+            );
         } else {
-            println!("     版本: {}  模式: {:?}", d.installed_version, d.install_mode);
+            println!(
+                "     版本: {}  模式: {:?}",
+                d.installed_version, d.install_mode
+            );
         }
         // 5 槽位占用（友好名）
         let slot_names = ["LFX", "GFX", "SFX", "MFX", "EFX"];
@@ -241,7 +269,11 @@ pub(super) fn detect_lost_slot(
     if pre_ok && post_ok {
         None
     } else {
-        Some(format!("PreMix={} PostMix={}", slot_friendly(&format!("{premix:?}")).unwrap_or_default(), slot_friendly(&format!("{postmix:?}")).unwrap_or_default()))
+        Some(format!(
+            "PreMix={} PostMix={}",
+            slot_friendly(&format!("{premix:?}")).unwrap_or_default(),
+            slot_friendly(&format!("{postmix:?}")).unwrap_or_default()
+        ))
     }
 }
 
@@ -249,9 +281,7 @@ pub(super) fn detect_lost_slot(
 ///
 /// EAPO 的 CLSID 见 `knowledge::KNOWN_APO_CLSIDS`（此处只存小写无花括号形式用于比较）。
 /// 返回 None = 无 EAPO。
-pub(super) fn detect_eapo_status(
-    slots: &[vxapo_driver::SlotValue; 5],
-) -> Option<String> {
+pub(super) fn detect_eapo_status(slots: &[vxapo_driver::SlotValue; 5]) -> Option<String> {
     const EAPO_PRE: &str = "eacd2258-fcac-4ff4-b36d-419e924a6d79";
     const EAPO_POST: &str = "ec1cc9ce-faed-4822-828a-82a81a6f018f";
     const SLOT_NAMES: [&str; 5] = ["LFX", "GFX", "SFX", "MFX", "EFX"];
@@ -306,4 +336,3 @@ pub(super) fn slot_friendly(clsid: &str) -> Option<String> {
     }
     None
 }
-

@@ -12,17 +12,19 @@
 ///
 /// 必须定义在模块声明之前：`macro_rules!` 为文本作用域，`args` / `tui` 子模块要用。
 macro_rules! tr {
-    ($zh:expr, $en:expr) => { i18n::tr($zh, $en) };
+    ($zh:expr, $en:expr) => {
+        i18n::tr($zh, $en)
+    };
 }
 
 mod args;
 mod commands;
 mod display;
 mod endpoint;
+mod i18n;
 mod knowledge;
 mod probe;
 mod reg;
-mod i18n;
 mod regdump;
 mod tui;
 mod verify;
@@ -30,7 +32,7 @@ mod verify;
 use std::io::Write;
 use std::path::Path;
 
-use i18n::{Lang, lang, set_lang};
+use i18n::{lang, set_lang, Lang};
 
 use probe::App;
 
@@ -58,7 +60,15 @@ fn run_subcommand(args: &[String]) -> i32 {
                 Err("install 用法：vxapo-cli install -d <device> [--mode LfxGfx|SfxMfx|SfxEfx] [--no-child] [--verify] [--timeout=<sec>] [--progress-file=<path>]".to_string())
             } else {
                 let progress = progress_file.as_deref().map(Path::new);
-                commands::install(&dev, mode.as_deref(), no_child, json, verify, timeout, progress)
+                commands::install(
+                    &dev,
+                    mode.as_deref(),
+                    no_child,
+                    json,
+                    verify,
+                    timeout,
+                    progress,
+                )
             }
         }
         "uninstall" => {

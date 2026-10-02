@@ -97,7 +97,9 @@ pub fn parse_prop_string(data: &[u8]) -> Option<String> {
     }
 }
 
-pub fn parse_waveformatex(data: &[u8]) -> Option<(Option<u32>, Option<u16>, Option<u16>, Option<u32>)> {
+pub fn parse_waveformatex(
+    data: &[u8],
+) -> Option<(Option<u32>, Option<u16>, Option<u16>, Option<u32>)> {
     if let Some(result) = try_parse_wfx(data, 0) {
         return Some(result);
     }
@@ -107,7 +109,10 @@ pub fn parse_waveformatex(data: &[u8]) -> Option<(Option<u32>, Option<u16>, Opti
     None
 }
 
-fn try_parse_wfx(data: &[u8], offset: usize) -> Option<(Option<u32>, Option<u16>, Option<u16>, Option<u32>)> {
+fn try_parse_wfx(
+    data: &[u8],
+    offset: usize,
+) -> Option<(Option<u32>, Option<u16>, Option<u16>, Option<u32>)> {
     if data.len() < offset + 16 {
         return None;
     }
@@ -132,7 +137,12 @@ fn try_parse_wfx(data: &[u8], offset: usize) -> Option<(Option<u32>, Option<u16>
         channel_mask = Some(u32::from_le_bytes([d[20], d[21], d[22], d[23]]));
     }
 
-    Some((Some(sample_rate), Some(channels), Some(bits_per_sample), channel_mask))
+    Some((
+        Some(sample_rate),
+        Some(channels),
+        Some(bits_per_sample),
+        channel_mask,
+    ))
 }
 
 pub const VAL_NAME_INTERFACE: &str = "{a45c254e-df1c-4efd-8020-67d146a850e0},2";

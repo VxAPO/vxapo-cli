@@ -18,7 +18,10 @@ pub(super) fn auto_register_driver() -> Result<(), String> {
     let dll_candidates = [
         exe_dir.join("vxapo_driver.dll"),
         exe_dir.join("resources").join("vxapo_driver.dll"),
-        exe_dir.parent().map(|p| p.join("resources").join("vxapo_driver.dll")).unwrap_or_default(),
+        exe_dir
+            .parent()
+            .map(|p| p.join("resources").join("vxapo_driver.dll"))
+            .unwrap_or_default(),
     ];
     let dll_path = if let Some(dll) = dll_candidates.iter().find(|p| p.exists()) {
         dll.display().to_string()
@@ -42,7 +45,10 @@ pub(super) fn auto_register_driver() -> Result<(), String> {
         if lang() == Lang::En {
             println!("  ⚠ {} not found (skipping auto-register - no problem if already registered by installer/regsvr32)", dll_candidates[0].display());
         } else {
-            println!("  ⚠ 未找到 {}（跳过自动注册——已由安装器/regsvr32 注册则无碍）", dll_candidates[0].display());
+            println!(
+                "  ⚠ 未找到 {}（跳过自动注册——已由安装器/regsvr32 注册则无碍）",
+                dll_candidates[0].display()
+            );
         }
         return Ok(());
     }
@@ -69,27 +75,27 @@ pub(super) fn auto_register_driver() -> Result<(), String> {
     match check {
         Ok(k) => match k.read_sz_value("") {
             Ok(p) => {
-                    if lang() == Lang::En {
-                        println!("  ✓ CLSID->DLL binding confirmed: {p}");
-                    } else {
-                        println!("  ✓ CLSID→DLL 绑定确认：{p}");
-                    }
+                if lang() == Lang::En {
+                    println!("  ✓ CLSID->DLL binding confirmed: {p}");
+                } else {
+                    println!("  ✓ CLSID→DLL 绑定确认：{p}");
                 }
+            }
             Err(e) => {
-                    if lang() == Lang::En {
-                        return Err(format!("CLSID binding read-back failed: {e}"));
-                    } else {
-                        return Err(format!("CLSID 绑定回读失败：{e}"));
-                    }
+                if lang() == Lang::En {
+                    return Err(format!("CLSID binding read-back failed: {e}"));
+                } else {
+                    return Err(format!("CLSID 绑定回读失败：{e}"));
                 }
+            }
         },
         Err(e) => {
-                    if lang() == Lang::En {
-                        return Err(format!("CLSID binding verification failed: {e}"));
-                    } else {
-                        return Err(format!("CLSID 绑定验证失败：{e}"));
-                    }
-                }
+            if lang() == Lang::En {
+                return Err(format!("CLSID binding verification failed: {e}"));
+            } else {
+                return Err(format!("CLSID 绑定验证失败：{e}"));
+            }
+        }
     }
 
     // 回读验证 AudioEngine APO 注册键：缺失会导致引擎静默拒载。
@@ -107,7 +113,9 @@ pub(super) fn auto_register_driver() -> Result<(), String> {
         }
         Err(e) => {
             if lang() == Lang::En {
-                return Err(format!("AudioEngine APO registration missing: {ae_path} ({e})"));
+                return Err(format!(
+                    "AudioEngine APO registration missing: {ae_path} ({e})"
+                ));
             } else {
                 return Err(format!("AudioEngine APO 注册键缺失：{ae_path}（{e}）"));
             }
@@ -131,4 +139,3 @@ pub(super) fn driver_binding_exists() -> bool {
 pub fn register() -> Result<(), String> {
     auto_register_driver()
 }
-
