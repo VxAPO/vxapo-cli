@@ -230,24 +230,27 @@ pub(super) fn convert_txt_to_toml(text: &str) -> Result<String, String> {
             }
             "maximizer" => {
                 // 当前模型名是 `compressor`（旧名 maximizer/leveler 由 driver 侧兜底映射）。
-                // EAPO Maximizer 的 gain_boost/max_output/target/lookahead/dither 在新模型里
-                // 没有对应参数，转换时丢弃并提示；release 对齐为 `release_ms`。
+                // EAPO Maximizer 的 gain_boost/max_output/target/lookahead/dither/release
+                // 在新模型里没有对应参数（释放固定自动），转换时丢弃并提示。
                 let kv = parse_kv(rest)?;
                 out.push_str("[[effects]]\ntype = \"compressor\"\n");
-                write_mapped(
-                    &mut out,
-                    &kv,
-                    &[("release", "release_ms"), ("wet", "wet"), ("dry", "dry")],
-                );
+                write_mapped(&mut out, &kv, &[("wet", "wet"), ("dry", "dry")]);
                 out.push('\n');
-                if ["gainboost", "maxoutput", "target", "lookahead", "dither"]
-                    .iter()
-                    .any(|k| kv.contains_key(*k))
+                if [
+                    "gainboost",
+                    "maxoutput",
+                    "target",
+                    "lookahead",
+                    "dither",
+                    "release",
+                ]
+                .iter()
+                .any(|k| kv.contains_key(*k))
                 {
                     if lang() == Lang::En {
-                        println!("⚠ Maximizer: mapped to `compressor`; gain_boost/max_output/target/lookahead/dither are no longer supported and were dropped");
+                        println!("⚠ Maximizer: mapped to `compressor`; gain_boost/max_output/target/lookahead/dither are no longer supported, release is always automatic — all were dropped");
                     } else {
-                        println!("⚠ Maximizer：已映射为 compressor；gain_boost/max_output/target/lookahead/dither 不再支持，已丢弃");
+                        println!("⚠ Maximizer：已映射为 compressor；gain_boost/max_output/target/lookahead/dither 不再支持、release 固定为自动释放，均已丢弃");
                     }
                 }
             }
@@ -314,7 +317,7 @@ pub(super) fn write_mapped(
 mod tests {
     use super::*;
 
-    /// Maximizer 段映射为当前模型名 `compressor`；无对应参数的旧字段不再写出。
+    /// Maximizer 段映射为当前模型名 `compressor`；无对应参数的旧字段（含 release）不再写出。
     #[test]
     fn maximizer_converts_to_compressor_without_legacy_params() {
         let toml = convert_txt_to_toml(
@@ -327,20 +330,26 @@ mod tests {
         );
         assert!(!toml.contains("type = \"maximizer\""));
         assert!(
-            toml.contains("release_ms = 10.0"),
-            "release 应对齐 release_ms：{toml}"
+            !toml.contains("release_ms"),
+            "release 固定自动，不应写出：{toml}"
         );
-        for dropped in ["gain_boost_db", "max_output_db", "target =", "lookahead_ms"] {
+        for dropped in [
+            "gain_boost_db",
+            "max_output_db",
+            "target =",
+            "lookahead_ms",
+            "release_ms",
+        ] {
             assert!(!toml.contains(dropped), "{dropped} 应已丢弃：{toml}");
         }
     }
 
-    /// 无旧字段时仍输出 compressor，且不产生多余键。
+    /// Release-only 的 Maximizer：释放固定自动 → 不产生任何键，仅类型映射。
     #[test]
     fn maximizer_release_only() {
         let toml = convert_txt_to_toml("Maximizer: Release 20\n").unwrap();
         assert!(toml.contains("type = \"compressor\""));
-        assert!(toml.contains("release_ms = 20"));
+        assert!(!toml.contains("release_ms"), "释放固定自动：{toml}");
     }
 }
 
