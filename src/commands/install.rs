@@ -10,7 +10,7 @@ use super::*;
 /// 展示当前谁占着 PreMix/PostMix 槽位（EAPO 等用友好名），
 /// 供用户决定是否保留为子 APO。
 pub fn preview_install(device_ref: &str) -> Result<String, String> {
-    let dev = resolve_device(device_ref)?;
+    // 单次全量枚举：resolve 与配对查找共用同一份列表（同 show_device_status）。
     let devices = enumerate_devices().map_err(|e| {
         if lang() == Lang::En {
             format!("Failed to enumerate devices: {e}")
@@ -18,21 +18,8 @@ pub fn preview_install(device_ref: &str) -> Result<String, String> {
             format!("枚举设备失败：{e}")
         }
     })?;
-    let d = devices
-        .iter()
-        .find(|d| {
-            d.endpoint
-                .as_ref()
-                .map(|e| e.endpoint_guid.eq_ignore_ascii_case(&dev.guid))
-                .unwrap_or(false)
-        })
-        .ok_or_else(|| {
-            if lang() == Lang::En {
-                "Device not in enumeration list".to_string()
-            } else {
-                "设备不在枚举列表".to_string()
-            }
-        })?;
+    let dev = resolve_device_in(device_ref, &devices)?;
+    let d = find_device_by_guid(&devices, &dev.guid)?;
     let slot_names = ["LFX", "GFX", "SFX", "MFX", "EFX"];
     let mut lines = vec![if lang() == Lang::En {
         format!("  Device: {}", dev.name)

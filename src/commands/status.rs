@@ -1,13 +1,17 @@
 //! commands/status.rs — 设备列表/状态渲染与槽位诊断
 
 use super::*;
+use crate::knowledge::{
+    normalize_clsid, EAPO_POST_MIX_CLSID, EAPO_PRE_MIX_CLSID, KNOWN_APO_CLSIDS_NORMALIZED,
+};
 
 /// 单设备状态详情（交互菜单 [s] 用）：只显示指定设备的槽位 + 子 APO 信息。
 ///
 /// 与 `list_devices` 不同——本函数聚焦单个设备，并展示 childApo 信息区
 /// （PreMixChild/PostMixChild，运行期委托给谁）。
 pub fn show_device_status(device_ref: &str) -> Result<(), String> {
-    let dev = resolve_device(device_ref)?;
+    // 单次全量枚举：resolve（可能按序号定位）与配对查找共用同一份列表
+    // （原实现 resolve_device 内部全量枚举一次、这里再枚举一次）。
     let devices = enumerate_devices().map_err(|e| {
         if lang() == Lang::En {
             format!("Failed to enumerate devices: {e}")
@@ -15,22 +19,9 @@ pub fn show_device_status(device_ref: &str) -> Result<(), String> {
             format!("枚举设备失败：{e}")
         }
     })?;
-    let d = devices
-        .iter()
-        .find(|d| {
-            d.endpoint
-                .as_ref()
-                .map(|e| e.endpoint_guid.eq_ignore_ascii_case(&dev.guid))
-                .unwrap_or(false)
-        })
-        .ok_or_else(|| {
-            if lang() == Lang::En {
-                "Device not in enumeration list".to_string()
-            } else {
-                "设备不在枚举列表".to_string()
-            }
-        })?;
-    // 上面的 `find` 谓词已要求 endpoint 存在；这里仍用 `let-else` 兜底而不是 unwrap。
+    let dev = resolve_device_in(device_ref, &devices)?;
+    let d = find_device_by_guid(&devices, &dev.guid)?;
+    // `find_device_by_guid` 谓词已要求 endpoint 存在；这里仍用 `let-else` 兜底而不是 unwrap。
     let Some(ep) = d.endpoint.as_ref() else {
         return Err(if lang() == Lang::En {
             "Device not in enumeration list".to_string()
@@ -90,12 +81,18 @@ pub fn show_device_status(device_ref: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// 查询端点主音量（0.0–1.0；失败返回 None）。
+/// 查询全部活动端点的主音量（端点 GUID 大写无花括号 → 0.0–1.0）。
 ///
 /// **为什么自起 COM 枚举而不走 driver**：driver facade 只暴露设备/槽位/安装状态，
-/// 没有端点音量查询接口；这里按端点 GUID 直接问 `IAudioEndpointVolume`，仅供
-/// `show_device_status` 的诊断展示，不参与安装/卸载写路径。
-pub(super) fn endpoint_volume(guid: &str) -> Option<f32> {
+/// 没有端点音量查询接口；这里按端点 GUID 直接问 `IAudioEndpointVolume`，
+/// 仅供 `list --json` 的展示字段，不参与安装/卸载写路径。
+///
+/// **一次建表**：COM 初始化一次、每流枚举一次、每端点 Activate 一次。
+/// 原实现对每台设备重复 CoInitializeEx/CoCreateInstance 并全端点线性找 GUID
+/// （N 台设备 = N 次 COM 初始化 + N×M 次 GetId 字符串转换），`list --json`
+/// 的耗时大头就在这里。首个命中的流优先（Render 先于 Capture），与原逐台
+/// 查找语义一致。
+pub(super) fn endpoint_volume_map() -> std::collections::HashMap<String, f32> {
     use windows::Win32::Media::Audio::Endpoints::IAudioEndpointVolume;
     use windows::Win32::Media::Audio::{
         EDataFlow, IMMDeviceEnumerator, MMDeviceEnumerator, DEVICE_STATE_ACTIVE,
@@ -104,33 +101,46 @@ pub(super) fn endpoint_volume(guid: &str) -> Option<f32> {
         CoCreateInstance, CoInitializeEx, CLSCTX_ALL, COINIT_MULTITHREADED,
     };
 
+    let mut map = std::collections::HashMap::new();
     unsafe {
         let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
         let enumerator: IMMDeviceEnumerator =
-            CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL).ok()?;
-        let needle = guid.to_ascii_uppercase();
+            match CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL) {
+                Ok(e) => e,
+                Err(_) => return map,
+            };
         for flow in [EDataFlow(0), EDataFlow(1)] {
-            let collection = enumerator
-                .EnumAudioEndpoints(flow, DEVICE_STATE_ACTIVE)
-                .ok()?;
-            let count = collection.GetCount().ok()?;
+            let Ok(collection) = enumerator.EnumAudioEndpoints(flow, DEVICE_STATE_ACTIVE) else {
+                continue;
+            };
+            let Ok(count) = collection.GetCount() else {
+                continue;
+            };
             for i in 0..count {
-                let device = collection.Item(i).ok()?;
-                let id = device.GetId().ok()?;
-                if id
-                    .to_string()
-                    .unwrap_or_default()
-                    .to_ascii_uppercase()
-                    .contains(&needle)
-                {
-                    let volume: IAudioEndpointVolume =
-                        device.Activate(CLSCTX_ALL, Some(std::ptr::null())).ok()?;
-                    return volume.GetMasterVolumeLevelScalar().ok();
+                let Ok(device) = collection.Item(i) else {
+                    continue;
+                };
+                let Ok(id) = device.GetId() else {
+                    continue;
+                };
+                // 端点 ID 形如 `{0.0.0.00000000}.{endpoint-guid}`；末段即端点 GUID。
+                let id_str = id.to_string().unwrap_or_default();
+                let Some(guid_part) = id_str.rsplit('.').next() else {
+                    continue;
+                };
+                let key = normalize_clsid(guid_part).to_ascii_uppercase();
+                if map.contains_key(&key) {
+                    continue; // 首个命中的流优先。
+                }
+                let volume: Option<IAudioEndpointVolume> =
+                    device.Activate(CLSCTX_ALL, Some(std::ptr::null())).ok();
+                if let Some(vol) = volume.and_then(|v| v.GetMasterVolumeLevelScalar().ok()) {
+                    map.insert(key, vol);
                 }
             }
         }
-        None
     }
+    map
 }
 
 /// 打印设备列表 + 槽位占用（包含 4.5 友好名 + 槽位失守标注，CLI 引用规范 5.2 status/list）。
@@ -147,6 +157,7 @@ pub fn list_devices(json: bool) -> Result<(), String> {
         // 格式与流向一律取自 driver 枚举（决策 6）：`DeviceInfo.format` + `EndpointInfo.flow`。
         // 原实现会另扫一遍 MMDevices 注册表（`probe::probe_all`）再按 GUID 拼回，
         // 现已删除；两条路径的口径对齐由 driver `format.rs` 的解析单测锁定。
+        let volume_map = endpoint_volume_map();
         let mut out: Vec<Device> = Vec::with_capacity(devices.len());
         for (i, d) in devices.iter().enumerate() {
             let ep = d.endpoint.as_ref();
@@ -183,7 +194,9 @@ pub fn list_devices(json: bool) -> Result<(), String> {
                 volume: if guid.is_empty() {
                     None
                 } else {
-                    endpoint_volume(&guid)
+                    volume_map
+                        .get(&normalize_clsid(&guid).to_ascii_uppercase())
+                        .copied()
                 },
                 eapo: detect_eapo_status(&d.slots),
                 lost_slot: if !guid.is_empty() && child_apo_key_exists(&guid) {
@@ -279,27 +292,23 @@ pub(super) fn detect_lost_slot(
 
 /// 检测设备上 EAPO 安装状态（哪些槽位被 EAPO PreMix/PostMix 占用）。
 ///
-/// EAPO 的 CLSID 见 `knowledge::KNOWN_APO_CLSIDS`（此处只存小写无花括号形式用于比较）。
+/// 直接比较 GUID 常量（`knowledge::EAPO_PRE_MIX_CLSID` / `EAPO_POST_MIX_CLSID`，
+/// 与 KNOWN_APO_CLSIDS 的两个 EAPO key 同源）；原实现对每槽位做
+/// `format! + to_lowercase + replace` 字符串归一化再比串，纯属绕路。
 /// 返回 None = 无 EAPO。
 pub(super) fn detect_eapo_status(slots: &[vxapo_driver::SlotValue; 5]) -> Option<String> {
-    const EAPO_PRE: &str = "eacd2258-fcac-4ff4-b36d-419e924a6d79";
-    const EAPO_POST: &str = "ec1cc9ce-faed-4822-828a-82a81a6f018f";
     const SLOT_NAMES: [&str; 5] = ["LFX", "GFX", "SFX", "MFX", "EFX"];
 
     let mut pre_slot: Option<&str> = None;
     let mut post_slot: Option<&str> = None;
     for (s, val) in slots.iter().enumerate() {
-        let normalized = match val {
-            vxapo_driver::SlotValue::Guid(g) => {
-                format!("{g:?}").to_lowercase().replace(['{', '}'], "")
+        if let vxapo_driver::SlotValue::Guid(g) = val {
+            if *g == EAPO_PRE_MIX_CLSID {
+                pre_slot = Some(SLOT_NAMES[s]);
             }
-            _ => continue,
-        };
-        if normalized == EAPO_PRE {
-            pre_slot = Some(SLOT_NAMES[s]);
-        }
-        if normalized == EAPO_POST {
-            post_slot = Some(SLOT_NAMES[s]);
+            if *g == EAPO_POST_MIX_CLSID {
+                post_slot = Some(SLOT_NAMES[s]);
+            }
         }
     }
     match (pre_slot, post_slot) {
@@ -325,14 +334,12 @@ pub(super) fn detect_eapo_status(slots: &[vxapo_driver::SlotValue; 5]) -> Option
 /// 槽位 GUID → 友好名（4.5：EAPO/VxAPO CLSID 映射）。
 ///
 /// 输入来自 `format!("{g:?}")`（windows-rs GUID Debug，大小写/花括号不确定），
-/// 与 KNOWN_APO_CLSIDS key（`{eacd2258-...}` 小写带花括号）做**规范化匹配**：
-/// 去花括号 + 转小写比较，兼容两种字形。
+/// 归一化后查预归一化表（`knowledge::KNOWN_APO_CLSIDS_NORMALIZED`，首次访问
+/// 建表一次）；原实现每次调用对全表 key 现做归一化，每设备 5 槽就是
+/// 5×N 次字符串分配。
 pub(super) fn slot_friendly(clsid: &str) -> Option<String> {
-    let normalized = clsid.to_lowercase().replace(['{', '}'], "");
-    for (k, v) in KNOWN_APO_CLSIDS.iter() {
-        if k.to_lowercase().replace(['{', '}'], "") == normalized {
-            return Some((*v).to_string());
-        }
-    }
-    None
+    let normalized = normalize_clsid(clsid);
+    KNOWN_APO_CLSIDS_NORMALIZED
+        .get(&normalized)
+        .map(|v| (*v).to_string())
 }

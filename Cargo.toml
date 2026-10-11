@@ -8,6 +8,14 @@ license = "GPL-3.0-or-later"
 [workspace]
 members = ["protocol"]
 
+# CLI 被 App 周期性 spawn（list --json 每 5s 两次），进程冷启动开销是主要成本：
+# 全量优化收紧二进制（LTO + 单 codegen unit + 剥符号），缩短 spawn 到退出全程。
+# panic 保持默认 unwind：CLI 依赖栈回退跑 Drop（事务/句柄清理），不用 abort。
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
+
 [dependencies]
 winreg = "0.52"
 vxapo-driver = { path = "../vxapo-driver" }

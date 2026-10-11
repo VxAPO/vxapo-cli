@@ -9,7 +9,7 @@ use vxapo_driver::{
     child_apo_key_exists, cleanup_orphan, device_config_path, enumerate_devices,
     find_endpoint_path, fix_config_acl, guid_to_string, install_endpoint, list_stale_installs,
     migrate_install, read_child_apo_guid, register_apo_with_path, snapshot_dir, uninstall_endpoint,
-    ChildApoKind, InstallConfig, CLSID_VXAPO_POST_MIX, CLSID_VXAPO_PRE_MIX,
+    ChildApoKind, DeviceInfo, InstallConfig, CLSID_VXAPO_POST_MIX, CLSID_VXAPO_PRE_MIX,
 };
 
 use vxapo_protocol::{
@@ -18,7 +18,6 @@ use vxapo_protocol::{
 };
 
 use crate::i18n::{lang, tr, Lang};
-use crate::knowledge::KNOWN_APO_CLSIDS;
 use crate::verify::emit_phase;
 
 /// 设备三元组（resolve_device 产物，CLI 引用规范 4.4.1）。
@@ -37,6 +36,14 @@ pub fn resolve_device(device_ref: &str) -> Result<DeviceRef, String> {
             format!("枚举设备失败：{e}")
         }
     })?;
+    resolve_device_in(device_ref, &devices)
+}
+
+/// [`resolve_device`] 的复用版：接受调用方已枚举的设备列表。
+///
+/// `show_device_status` / `preview_install` 等随后本来就要全量枚举的调用方，
+/// 传入同一份列表即可避免 resolve 阶段的第二次全量枚举。
+pub fn resolve_device_in(device_ref: &str, devices: &[DeviceInfo]) -> Result<DeviceRef, String> {
     if device_ref.starts_with('{') {
         let guid = device_ref.to_owned();
         // GUID 格式校验（{xxxxxxxx-...}，len=38）
@@ -104,6 +111,28 @@ pub fn resolve_device(device_ref: &str) -> Result<DeviceRef, String> {
             "未知设备：<{device_ref}>（可用 list 查看序号，或用 {{GUID}} 形式）"
         ))
     }
+}
+
+/// 按 GUID 在枚举列表中找设备（resolve 后的配对查找；两处调用方曾各自重扫一遍）。
+pub fn find_device_by_guid<'a>(
+    devices: &'a [DeviceInfo],
+    guid: &str,
+) -> Result<&'a DeviceInfo, String> {
+    devices
+        .iter()
+        .find(|d| {
+            d.endpoint
+                .as_ref()
+                .map(|e| e.endpoint_guid.eq_ignore_ascii_case(guid))
+                .unwrap_or(false)
+        })
+        .ok_or_else(|| {
+            if lang() == Lang::En {
+                "Device not in enumeration list".to_string()
+            } else {
+                "设备不在枚举列表".to_string()
+            }
+        })
 }
 
 /// 管理员检查（install/uninstall 需 HKLM 写权限）。

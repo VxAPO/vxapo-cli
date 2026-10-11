@@ -214,6 +214,43 @@ pub static KNOWN_APO_CLSIDS: LazyLock<HashMap<String, &'static str>> = LazyLock:
     m
 });
 
+/// 规范化（去花括号 + 小写）CLSID → 友好名。
+///
+/// `slot_friendly` 每次调用都会收到 `format!("{g:?}")` 产物，若逐条对
+/// [`KNOWN_APO_CLSIDS`] 的 key 现做 `to_lowercase().replace()`，等于每次调用
+/// 把静态表全量重新归一化一遍（每设备 5 槽 × 每槽 N 个 key 的字符串分配）。
+/// 这张表只在首次访问时归一化一次。
+pub static KNOWN_APO_CLSIDS_NORMALIZED: LazyLock<HashMap<String, &'static str>> =
+    LazyLock::new(|| {
+        KNOWN_APO_CLSIDS
+            .iter()
+            .map(|(k, v)| (normalize_clsid(k), *v))
+            .collect()
+    });
+
+/// CLSID 字形归一化：去花括号 + 小写（`slot_friendly` 输入与表 key 的公共口径）。
+pub fn normalize_clsid(clsid: &str) -> String {
+    clsid.to_lowercase().replace(['{', '}'], "")
+}
+
+/// EAPO 槽位判定用 GUID 常量（与 [`KNOWN_APO_CLSIDS`] 的两个 EAPO key 同源）。
+///
+/// `detect_eapo_status` 直接比较 GUID，不再对每个槽位做
+/// `format! + to_lowercase + replace` 字符串归一化。
+/// 构造方式与 driver `sys/consts.rs` 的 CLSID 常量一致（const fn，无宏依赖）。
+pub const EAPO_PRE_MIX_CLSID: windows::core::GUID = windows::core::GUID::from_values(
+    0xEACD2258,
+    0xFCAC,
+    0x4FF4,
+    [0xB3, 0x6D, 0x41, 0x9E, 0x92, 0x4A, 0x6D, 0x79],
+);
+pub const EAPO_POST_MIX_CLSID: windows::core::GUID = windows::core::GUID::from_values(
+    0xEC1CC9CE,
+    0xFAED,
+    0x4822,
+    [0x82, 0x8A, 0x82, 0xA8, 0x1A, 0x6F, 0x01, 0x8F],
+);
+
 pub const SYSTEM_APO_CLSIDS: &[&str] = &[
     "{da2c9ece-7418-4906-b4fa-0a00b3eb88aa}",
     "{c9453e73-8c5c-4463-9984-af8bab2f5447}",

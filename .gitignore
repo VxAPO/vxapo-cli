@@ -8,3 +8,5 @@ verify_install.txt
 *.txt
 
 # Docs archived to ../vxapo-docs
+# ts-rs 测试导出的 TS 绑定（App 侧经生成流程拷入自己的 src/lib/generated/）
+protocol/bindings/
