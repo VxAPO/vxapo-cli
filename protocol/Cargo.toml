@@ -1,7 +1,7 @@
 [package]
 name = "vxapo-protocol"
 version = "0.3.0"
-edition = "2021"
+edition = "2024"
 description = "VxAPO CLI --json 输出契约（CLI 与 App 共用的纯数据结构）"
 license = "GPL-3.0-or-later"
 

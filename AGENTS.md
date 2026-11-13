@@ -8,7 +8,7 @@
 
 - 风格配置在 `rustfmt.toml`（`style_edition = "2021"`、`newline_style = "Unix"`）。
   折行策略就是 rustfmt 默认值，**没有任何自定义 width 参数**——这是刻意的。
-- 工具链钉在 `rust-toolchain.toml`（`channel = "1.97.1"`）。**不要**本地随意升级，见 §4。
+- 工具链钉在 `rust-toolchain.toml`（`channel = "1.100.0"`）。**不要**本地随意升级，见 §4。
 - 本仓是 workspace 根，成员为 `protocol/`（包名 `vxapo-protocol`）。
 - **不要手工微调格式**，也不要为局部观感引入新的格式化工具。
 
