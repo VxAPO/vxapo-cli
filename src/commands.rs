@@ -6,10 +6,10 @@
 use std::path::Path;
 
 use vxapo_driver::{
+    CLSID_VXAPO_POST_MIX, CLSID_VXAPO_PRE_MIX, ChildApoKind, DeviceInfo, InstallConfig,
     child_apo_key_exists, cleanup_orphan, device_config_path, enumerate_devices,
     find_endpoint_path, fix_config_acl, guid_to_string, install_endpoint, list_stale_installs,
     migrate_install, read_child_apo_guid, register_apo_with_path, snapshot_dir, uninstall_endpoint,
-    ChildApoKind, DeviceInfo, InstallConfig, CLSID_VXAPO_POST_MIX, CLSID_VXAPO_PRE_MIX,
 };
 
 use vxapo_protocol::{
@@ -17,7 +17,7 @@ use vxapo_protocol::{
     StaleTargetState,
 };
 
-use crate::i18n::{lang, tr, Lang};
+use crate::i18n::{Lang, lang, tr};
 use crate::verify::emit_phase;
 
 /// 设备三元组（resolve_device 产物，CLI 引用规范 4.4.1）。
@@ -49,7 +49,9 @@ pub fn resolve_device_in(device_ref: &str, devices: &[DeviceInfo]) -> Result<Dev
         // GUID 格式校验（{xxxxxxxx-...}，len=38）
         if guid.len() != 38 || !guid.ends_with('}') {
             if lang() == Lang::En {
-                return Err(format!("Invalid GUID: <{device_ref}> (expected {{XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX}})"));
+                return Err(format!(
+                    "Invalid GUID: <{device_ref}> (expected {{XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX}})"
+                ));
             } else {
                 return Err(format!(
                     "无效 GUID：<{device_ref}>（应为 {{XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX}}）"

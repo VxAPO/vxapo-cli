@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::LazyLock;
 
-use vxapo_driver::{guid_to_string, CLSID_VXAPO_POST_MIX, CLSID_VXAPO_PRE_MIX};
+use vxapo_driver::{CLSID_VXAPO_POST_MIX, CLSID_VXAPO_PRE_MIX, guid_to_string};
 
 pub struct PropertyMeta {
     pub name: &'static str,

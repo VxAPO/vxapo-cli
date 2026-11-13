@@ -238,7 +238,9 @@ pub fn snapshot_restore(guid: &str) -> Result<(), String> {
         }
     })?;
     if lang() == Lang::En {
-        println!("✓ Baseline restored (slots cleared + childApoPath removed). Run install to return to installed state.");
+        println!(
+            "✓ Baseline restored (slots cleared + childApoPath removed). Run install to return to installed state."
+        );
     } else {
         println!("✓ 已恢复基线（槽位清空 + childApoPath 删除）。如需回到基线安装态，请 install。");
     }

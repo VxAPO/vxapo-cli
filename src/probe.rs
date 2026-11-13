@@ -1,6 +1,6 @@
 use std::collections::HashSet;
-use winreg::enums::*;
 use winreg::RegKey;
+use winreg::enums::*;
 
 use crate::endpoint::{Endpoint, EndpointKind};
 use crate::reg;

@@ -17,9 +17,5 @@ pub fn lang() -> Lang {
 }
 
 pub fn tr<'a>(zh: &'a str, en: &'a str) -> &'a str {
-    if lang() == Lang::En {
-        en
-    } else {
-        zh
-    }
+    if lang() == Lang::En { en } else { zh }
 }

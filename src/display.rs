@@ -105,7 +105,9 @@ pub fn print_detail_header(ep: &Endpoint) {
     if let (Some(ch), Some(mask)) = (ep.channels, ep.channel_mask) {
         let speaker_count = mask.count_ones();
         if speaker_count > 0 && speaker_count != ch as u32 {
-            println!("  {YELLOW}WARNING: mask has {speaker_count} speaker(s) but device reports {ch} channel(s){RESET}");
+            println!(
+                "  {YELLOW}WARNING: mask has {speaker_count} speaker(s) but device reports {ch} channel(s){RESET}"
+            );
         }
     }
 

@@ -2,7 +2,7 @@
 
 use super::*;
 use crate::knowledge::{
-    normalize_clsid, EAPO_POST_MIX_CLSID, EAPO_PRE_MIX_CLSID, KNOWN_APO_CLSIDS_NORMALIZED,
+    EAPO_POST_MIX_CLSID, EAPO_PRE_MIX_CLSID, KNOWN_APO_CLSIDS_NORMALIZED, normalize_clsid,
 };
 
 /// 单设备状态详情（交互菜单 [s] 用）：只显示指定设备的槽位 + 子 APO 信息。
@@ -95,10 +95,10 @@ pub fn show_device_status(device_ref: &str) -> Result<(), String> {
 pub(super) fn endpoint_volume_map() -> std::collections::HashMap<String, f32> {
     use windows::Win32::Media::Audio::Endpoints::IAudioEndpointVolume;
     use windows::Win32::Media::Audio::{
-        EDataFlow, IMMDeviceEnumerator, MMDeviceEnumerator, DEVICE_STATE_ACTIVE,
+        DEVICE_STATE_ACTIVE, EDataFlow, IMMDeviceEnumerator, MMDeviceEnumerator,
     };
     use windows::Win32::System::Com::{
-        CoCreateInstance, CoInitializeEx, CLSCTX_ALL, COINIT_MULTITHREADED,
+        CLSCTX_ALL, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx,
     };
 
     let mut map = std::collections::HashMap::new();

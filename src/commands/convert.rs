@@ -248,9 +248,13 @@ pub(super) fn convert_txt_to_toml(text: &str) -> Result<String, String> {
                 .any(|k| kv.contains_key(*k))
                 {
                     if lang() == Lang::En {
-                        println!("⚠ Maximizer: mapped to `compressor`; gain_boost/max_output/target/lookahead/dither are no longer supported, release is always automatic — all were dropped");
+                        println!(
+                            "⚠ Maximizer: mapped to `compressor`; gain_boost/max_output/target/lookahead/dither are no longer supported, release is always automatic — all were dropped"
+                        );
                     } else {
-                        println!("⚠ Maximizer：已映射为 compressor；gain_boost/max_output/target/lookahead/dither 不再支持、release 固定为自动释放，均已丢弃");
+                        println!(
+                            "⚠ Maximizer：已映射为 compressor；gain_boost/max_output/target/lookahead/dither 不再支持、release 固定为自动释放，均已丢弃"
+                        );
                     }
                 }
             }

@@ -43,7 +43,10 @@ pub(super) fn auto_register_driver() -> Result<(), String> {
     };
     if dll_path.is_empty() {
         if lang() == Lang::En {
-            println!("  ⚠ {} not found (skipping auto-register - no problem if already registered by installer/regsvr32)", dll_candidates[0].display());
+            println!(
+                "  ⚠ {} not found (skipping auto-register - no problem if already registered by installer/regsvr32)",
+                dll_candidates[0].display()
+            );
         } else {
             println!(
                 "  ⚠ 未找到 {}（跳过自动注册——已由安装器/regsvr32 注册则无碍）",

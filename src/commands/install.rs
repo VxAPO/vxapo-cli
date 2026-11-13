@@ -224,7 +224,9 @@ pub(super) fn ensure_default_config(dev: &DeviceRef, json: bool) {
                     println!("   Use: vxapo-cli config set -d <device> -f <your config file>");
                 } else {
                     println!("⚠ 未检测到 config.toml（{path}），APO 将按无配置运行。");
-                    println!("   请用 config set 写入：vxapo-cli config set -d <device> -f <你的配置文件>");
+                    println!(
+                        "   请用 config set 写入：vxapo-cli config set -d <device> -f <你的配置文件>"
+                    );
                 }
             }
         }

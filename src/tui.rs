@@ -251,9 +251,13 @@ pub(super) fn driver_device_menu(dev_idx: &usize) -> bool {
                 let args: Vec<String> = line.split_whitespace().map(|s| s.to_string()).collect();
                 if args.is_empty() {
                     let msg = if lang() == Lang::En {
-                        format!("Unknown input (i/u/c/p/r/x/s/b/q/h, or type a subcommand like install -d {dev_idx})")
+                        format!(
+                            "Unknown input (i/u/c/p/r/x/s/b/q/h, or type a subcommand like install -d {dev_idx})"
+                        )
                     } else {
-                        format!("未知输入（i/u/c/p/r/x/s/b/q/h，或直接打子命令如 install -d {dev_idx}）")
+                        format!(
+                            "未知输入（i/u/c/p/r/x/s/b/q/h，或直接打子命令如 install -d {dev_idx}）"
+                        )
                     };
                     println!("{msg}");
                 } else {
@@ -278,9 +282,13 @@ pub(super) fn driver_device_menu(dev_idx: &usize) -> bool {
                         }
                     } else {
                         let msg = if lang() == Lang::En {
-                            format!("Unknown input: {input} (Supported: i/u/c/p/r/x/s/b/q/h, or type a subcommand like install -d {dev_idx})")
+                            format!(
+                                "Unknown input: {input} (Supported: i/u/c/p/r/x/s/b/q/h, or type a subcommand like install -d {dev_idx})"
+                            )
                         } else {
-                            format!("未知输入：{input}（支持 i/u/c/p/r/x/s/b/q/h，或直接打子命令如 install -d {dev_idx}）")
+                            format!(
+                                "未知输入：{input}（支持 i/u/c/p/r/x/s/b/q/h，或直接打子命令如 install -d {dev_idx}）"
+                            )
                         };
                         println!("{msg}");
                     }

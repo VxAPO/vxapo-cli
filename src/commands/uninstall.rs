@@ -103,7 +103,9 @@ pub fn uninstall(device_ref: &str, json: bool) -> Result<(), String> {
     if residual > 0 {
         let _ = vxapo_driver::ensure_audio_service_running();
         if lang() == Lang::En {
-            return Err(format!("Detected {residual} slot(s) still containing VxAPO CLSID after uninstall - audio process may still be holding them. Please retry."));
+            return Err(format!(
+                "Detected {residual} slot(s) still containing VxAPO CLSID after uninstall - audio process may still be holding them. Please retry."
+            ));
         } else {
             return Err(format!(
                 "卸载后检测到 {residual} 个槽位残留 VxAPO CLSID——音频进程可能仍占用，请重试。"

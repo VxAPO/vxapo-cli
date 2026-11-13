@@ -17,20 +17,20 @@ use std::time::{Duration, Instant};
 use serde_json::json;
 
 use vxapo_driver::{
-    find_endpoint_path, read_child_apo_guid, write_install_config, ChildApoKind, InstallConfig,
-    InstallMode, RegKey,
+    ChildApoKind, InstallConfig, InstallMode, RegKey, find_endpoint_path, read_child_apo_guid,
+    write_install_config,
 };
 use vxapo_protocol::{InstallProgressEvent, ServiceAction};
-use windows::core::HSTRING;
-use windows::Win32::Foundation::{LocalFree, HANDLE, HLOCAL, INVALID_HANDLE_VALUE};
+use windows::Win32::Foundation::{HANDLE, HLOCAL, INVALID_HANDLE_VALUE, LocalFree};
 use windows::Win32::Security::Authorization::ConvertStringSecurityDescriptorToSecurityDescriptorW;
 use windows::Win32::Security::{PSECURITY_DESCRIPTOR, SECURITY_ATTRIBUTES};
-use windows::Win32::Storage::FileSystem::{ReadFile, PIPE_ACCESS_INBOUND};
+use windows::Win32::Storage::FileSystem::{PIPE_ACCESS_INBOUND, ReadFile};
 use windows::Win32::System::Pipes::{
     ConnectNamedPipe, CreateNamedPipeW, DisconnectNamedPipe, PIPE_READMODE_MESSAGE,
     PIPE_TYPE_MESSAGE, PIPE_UNLIMITED_INSTANCES, PIPE_WAIT,
 };
 use windows::Win32::System::Registry::HKEY_LOCAL_MACHINE;
+use windows::core::HSTRING;
 
 use crate::commands::DeviceRef;
 use crate::i18n::tr;
@@ -548,11 +548,11 @@ fn create_pipe_servers(
 /// E_PENDING / AUDCLNT_E_DEVICE_INVALIDATED 等瞬时错误重试 5×500ms。
 fn trigger_apo_load(guid: &str, is_capture: bool) -> Result<(), String> {
     use windows::Win32::Media::Audio::{
-        IAudioClient, IMMDeviceEnumerator, MMDeviceEnumerator, AUDCLNT_E_DEVICE_INVALIDATED,
-        AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_NOPERSIST,
+        AUDCLNT_E_DEVICE_INVALIDATED, AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_NOPERSIST,
+        IAudioClient, IMMDeviceEnumerator, MMDeviceEnumerator,
     };
     use windows::Win32::System::Com::{
-        CoCreateInstance, CoInitializeEx, CoTaskMemFree, CLSCTX_ALL, COINIT_MULTITHREADED,
+        CLSCTX_ALL, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx, CoTaskMemFree,
     };
 
     let flow = if is_capture {

@@ -1,5 +1,5 @@
-use winreg::enums::*;
 use winreg::RegKey;
+use winreg::enums::*;
 
 pub fn read_reg_sz(key: &RegKey, value_name: &str) -> Option<String> {
     let rv = key.get_raw_value(value_name).ok()?;

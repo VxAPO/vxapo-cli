@@ -32,7 +32,7 @@ mod verify;
 use std::io::Write;
 use std::path::Path;
 
-use i18n::{lang, set_lang, Lang};
+use i18n::{Lang, lang, set_lang};
 
 use probe::App;
 
@@ -129,8 +129,12 @@ fn print_help() {
         println!("Interactive mode: run vxapo-cli without arguments");
         println!();
         println!("Subcommand mode: vxapo-cli <command> [options]");
-        println!("  list / status                     List audio endpoints + slot usage + lost-slot markers");
-        println!("  install -d <device> [--mode LfxGfx|SfxMfx|SfxEfx] [--no-child] [--verify] [--timeout=<sec>]");
+        println!(
+            "  list / status                     List audio endpoints + slot usage + lost-slot markers"
+        );
+        println!(
+            "  install -d <device> [--mode LfxGfx|SfxMfx|SfxEfx] [--no-child] [--verify] [--timeout=<sec>]"
+        );
         println!("  uninstall -d <device>");
         println!("  config set -d <device> -f <file>   Write per-device config.toml");
         println!("  config show -d <device>            Read back config.toml");
@@ -145,7 +149,9 @@ fn print_help() {
         println!();
         println!("子命令模式：vxapo-cli <命令> [参数]");
         println!("  list / status                     列出音频端点 + 槽位占用 + 失守标注");
-        println!("  install -d <device> [--mode LfxGfx|SfxMfx|SfxEfx] [--no-child] [--verify] [--timeout=<sec>]");
+        println!(
+            "  install -d <device> [--mode LfxGfx|SfxMfx|SfxEfx] [--no-child] [--verify] [--timeout=<sec>]"
+        );
         println!("  uninstall -d <device>");
         println!("  config set -d <device> -f <file>   写 per-device config.toml");
         println!("  config show -d <device>            读回 config.toml");
