@@ -83,7 +83,7 @@ git config core.hooksPath .githooks
    `rust-toolchain.toml`。
 3. 无变化则只更新 `rust-toolchain.toml`。
 
-> driver 与本仓各自钉同一版本，升级时两个仓的 `rust-toolchain.toml` 要一起改。
+> 三个 Rust 仓库钉同一版本，升级时 driver / cli / app 的 `rust-toolchain.toml` 要一起改。
 
 ---
 
@@ -107,8 +107,10 @@ cargo fmt -p vxapo-cli -p vxapo-protocol -- --check # 退出码 0
 cargo clippy --all-targets -- -D warnings   # 当前退出码 101
 ```
 
-本仓 clippy 长期未收口，约有 12 类告警（`doc_lazy_continuation`、`needless_borrow`、
-`if_same_then_else` 等）。**这一状态在格式化之前就已存在**——已用 stash 回到 pre-fmt
+本仓 clippy 长期未收口，共 10 类告警（各 1 处）：`type_complexity`、
+`needless_borrows_for_generic_args`、`needless_borrow`、`match_like_matches_macro`、
+`manual_ignore_case_cmp`、`items_after_test_module`、`if_same_then_else`、
+`doc_lazy_continuation`、`diverging_sub_expression`、`collapsible_if`。**这一状态在格式化之前就已存在**——已用 stash 回到 pre-fmt
 状态实证，pre-fmt 与 post-fmt 的错误集合完全一致，格式化未引入任何新 lint。
 
 因此：**不要**把 clippy 通过当作本仓的提交门槛（会永远提交不了），
@@ -120,7 +122,7 @@ cargo clippy --all-targets -- -D warnings   # 当前退出码 101
 ## 8. 与 driver 的接口：只有 facade 可用
 
 本仓通过 path 依赖 `../vxapo-driver`。**driver 的所有模块都是 `pub(crate)`**，
-对外只经它 `src/lib.rs` 末尾的 facade（约 20 个 `pub use`）暴露。
+对外只经它 `src/lib.rs` 末尾的 facade（14 条 `pub use`，41 个对外条目）暴露。
 
 **因此：`vxapo_driver::` 后面只能用 facade 登记过的条目。** 若需要某个还没导出的
 driver 内部 API，正确做法是**在 driver 仓的 `lib.rs` 里登记**，而不是绕路

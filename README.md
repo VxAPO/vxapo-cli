@@ -37,7 +37,7 @@ VxAPO CLI 是 VxAPO 的命令行工具，负责设备管理、配置读写与诊
 | `config set -d <device> -f <file>` | 写配置 | 写回前按 driver 边界限幅 | 同上 |
 | `config convert <old> <out>` | 旧文本配置转 TOML | 一次性迁移 | 同上 |
 | `snapshot create` / `diff` / `restore -d <device>` | 注册表基线 | 只动注册表，不触碰配置内容 | `src/commands/snapshot.rs` |
-| `stale list` / `migrate` / `cleanup` | 旧 GUID 残留 | 以设备实例 ID 匹配活跃端点 | `src/commands/install.rs` |
+| `stale list` / `migrate` / `cleanup` / `fix-acl` | 旧 GUID 残留 | 以设备实例 ID 匹配活跃端点 | `src/commands/install.rs` |
 | `effects schema [--json]` | 效果器参数表 | App 据此生成 TS 表 | `src/commands/effects.rs` |
 | `help` / 无参数 | 打印帮助 / 进入交互模式 | — | `src/main.rs` |
 
@@ -74,7 +74,7 @@ VxAPO CLI 是 VxAPO 的命令行工具，负责设备管理、配置读写与诊
 
 ## 5 · 契约 crate（`protocol/`）
 
-本仓是 cargo workspace，成员 `protocol/` 只依赖 serde 与 ts-rs，**不依赖 driver**：
+本仓是 cargo workspace，成员 `protocol/` 只依赖 serde、serde_json 与 ts-rs，**不依赖 driver**：
 
 - 安装 / 卸载进度事件：`InstallProgressEvent`（`#[serde(tag = "event")]`，六类 variant）。
 - 残留列表：`StaleInstall` / `StaleTargetState` / `StaleMatchedBy`。迁移报告：`MigrationReport`。
@@ -173,7 +173,7 @@ references.
 | `config set -d <device> -f <file>` | Write config | Clamps to driver bounds before writing | same |
 | `config convert <old> <out>` | Legacy text config to TOML | One-time migration | same |
 | `snapshot create` / `diff` / `restore -d <device>` | Registry baseline | Touches the registry only, never config content | `src/commands/snapshot.rs` |
-| `stale list` / `migrate` / `cleanup` | Stale GUID records | Matches active endpoints by device instance ID | `src/commands/install.rs` |
+| `stale list` / `migrate` / `cleanup` / `fix-acl` | Stale GUID records | Matches active endpoints by device instance ID | `src/commands/install.rs` |
 | `effects schema [--json]` | Effect parameter table | The App generates its TS table from this | `src/commands/effects.rs` |
 | `help` / no arguments | Print help / enter interactive mode | — | `src/main.rs` |
 
@@ -215,8 +215,8 @@ for a mode.
 
 ## 5 · Contract crate (`protocol/`)
 
-This repository is a cargo workspace. The `protocol/` member depends on serde and ts-rs only,
-and **never on the driver**:
+This repository is a cargo workspace. The `protocol/` member depends on serde, serde_json and
+ts-rs only, and **never on the driver**:
 
 - Install and uninstall progress events: `InstallProgressEvent`, with six variants tagged by
   `event`.
