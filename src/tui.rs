@@ -413,7 +413,7 @@ pub(super) fn config_menu(guid: &str) {
 
 /// 读一行输入（trim 后返回）。
 ///
-/// 输入被重定向关闭（EOF）或读取失败时给出双语提示并返回空串——菜单按「返回上一级」
+/// 输入被重定向关闭（EOF）或读取失败时给出双语提示并返回空串，菜单按「返回上一级」
 /// 处理，不会因 stdin 异常 panic。
 pub(super) fn read_line() -> String {
     // flush 失败不影响读取（stdout 已关闭时也没有可写的提示）。

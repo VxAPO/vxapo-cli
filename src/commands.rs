@@ -139,7 +139,7 @@ pub fn find_device_by_guid<'a>(
 
 /// 管理员检查（install/uninstall 需 HKLM 写权限）。
 ///
-/// 真实写验证：create 探测键后**写入一个值**再删除——仅 create/open 成功不够
+/// 真实写验证：create 探测键后**写入一个值**再删除。仅 create/open 成功不足以证明写权限
 /// （键已存在时无写权限的用户也可能打开成功，导致 install 阶段才报 0x80070005）。
 pub fn require_admin() -> Result<(), String> {
     let probe_key = r"SOFTWARE\VxAPO\CLIProbe";

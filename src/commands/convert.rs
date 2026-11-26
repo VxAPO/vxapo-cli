@@ -59,7 +59,7 @@ pub fn config_show(device_ref: &str) -> Result<(), String> {
     };
     println!("--- config.toml ({path}) ---");
     println!("{content}");
-    // 读回一致性验证（CLI 引用规范 三「config show 读回验证——文件级」，不解析 DSP 语义）。
+    // 读回一致性验证（config show 读回验证，文件级；不解析 DSP 语义）。
     if lang() == Lang::En {
         println!("✓ File read back successfully ({} bytes)", content.len());
     } else {
@@ -321,7 +321,7 @@ pub(super) fn write_mapped(
 mod tests {
     use super::*;
 
-    /// Maximizer 段映射为当前模型名 `compressor`；无对应参数的旧字段（含 release）不再写出。
+    /// Maximizer 段映射为当前模型名 `compressor`；无对应参数的旧字段（含 release）跳过写出。
     #[test]
     fn maximizer_converts_to_compressor_without_legacy_params() {
         let toml = convert_txt_to_toml(

@@ -99,7 +99,7 @@ pub fn install(
 
     // 每次安装都刷新全局 APO 注册（幂等）。
     // 旧机器可能已有 CLSID→DLL 绑定，但 AudioEngine\AudioProcessingObjects 键
-    // 是早期缺字段/缺 MaxInstances 的旧注册——只按「绑定存在」跳过会继续拒载。
+    // 是缺字段/缺 MaxInstances 的旧注册，只按「绑定存在」跳过会继续拒载。
     emit_phase(progress_file, "register");
     auto_register_driver()?;
 
@@ -112,7 +112,7 @@ pub fn install(
         crate::verify::install_verify(&dev, &config, timeout_secs, progress_file)
     } else {
         // DisableProtectedAudioDG、槽位/ProcessingModes 写入和安装后重启
-        // 均由 driver install_endpoint 全流程处理（CLI 不再重复）。
+        // 均由 driver install_endpoint 全流程处理，CLI 保持精简。
         install_endpoint(&dev.guid, &dev.name, &dev.connection, &config, true)
             .map_err(|e| {
                 if lang() == Lang::En {
@@ -287,7 +287,7 @@ pub fn stale_migrate(
 ) -> Result<(), String> {
     require_admin()?;
     // 迁移**不停服**：写/删端点 FxProperties 值只需要句柄具备 KEY_SET_VALUE
-    // （`RegKey::open_for_write` 即是），与 audiodg 是否持有点端无关——在活动音频流
+    // （`RegKey::open_for_write` 即是），与 audiodg 是否持有点端无关，在活动音频流
     // 上删除槽位值同样成功。因此这里既不 stop AudioSrv 也不 taskkill audiodg；
     // 修复分支若真的改写了槽位，由 driver 在写完后**重启端点**让变更生效
     // （引擎会缓存端点 APO 链，只改注册表不会立刻重载）。
@@ -339,7 +339,7 @@ pub fn stale_fix_acl(guid: &str, json: bool) -> Result<(), String> {
 
 // ── driver 类型 → 对外契约类型（映射集中在此，protocol 不依赖 driver）──────────
 //
-// 说明：`matched_by` / `target_state` 在 driver 侧是 `String`（便于内部演进），
+// `matched_by` / `target_state` 在 driver 侧是 `String`，取值由 driver 定义。
 // 到契约层收敛为枚举，未知取值按最保守分支处理（见下方注释）。
 
 /// driver 残留记录 → `vxapo_protocol::StaleInstall`。

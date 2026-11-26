@@ -44,7 +44,7 @@ const PIPE_INSTANCES: u32 = 8;
 const TEST_VALUE: &str = "DeviceTestPipeName";
 const TEST_KEY: &str = r"SOFTWARE\VxAPO";
 
-/// 阶段超时（秒）——安装必须快速给出结果，失败也别让用户等。
+/// 阶段超时（秒）：安装必须快速给出结果，失败时同样及时返回。
 const STOP_TIMEOUT_SECS: u32 = 3;
 const START_TIMEOUT_SECS: u32 = 5;
 const PIPE_WAIT_SECS: u64 = 2;
@@ -207,7 +207,7 @@ pub(crate) fn install_verify(
         mode_config.install_mode = *mode;
         let mode_name = mode_str(*mode);
 
-        // 1. 纯注册表写入（覆盖安装天然安全，无需先 uninstall）。
+        // 1. 纯注册表写入（覆盖安装天然安全，可直接执行）。
         sink.emit(InstallProgressEvent::InstallWrite {
             mode: mode_name.to_string(),
         });
@@ -379,7 +379,7 @@ fn run_pipe_verify(
         json!({"event": "trace", "step": "server_spawned"}),
     );
 
-    // 触发 audiodg 建图。慢设备上 COM 调用可能耗时 5–8s，不再设触发级超时
+    // 触发 audiodg 建图。慢设备上 COM 调用可能耗时 5–8s，不设触发级超时
     // （避免误杀）；触发线程 panic 时 recv 返回 Disconnected，按"无消息"继续。
     // 20s 全局看门狗仍作为最终兜底。
     let (trigger_tx, trigger_rx) = mpsc::channel::<Result<(), String>>();
@@ -440,7 +440,7 @@ fn run_pipe_verify(
 
     // 清理：删注册表值、关管道（服务端线程随之退出）。
     clear_test_pipe_name();
-    // 注意：**不能从主线程 CloseHandle(pipe)**——服务端线程正阻塞在
+    // 注意：主线程须**避开** CloseHandle(pipe)：服务端线程正阻塞在
     // ConnectNamedPipe 上，CloseHandle 会一直等该等待完成（导致主线程永久卡死，
     // 只能靠全局看门狗 abort）。进程在 main 返回时由系统回收所有句柄，
     // 这里直接放行即可。
@@ -448,7 +448,7 @@ fn run_pipe_verify(
         &trace_file,
         json!({"event": "trace", "step": "cleanup_done"}),
     );
-    // 注意：**不能 join 服务端线程**——它阻塞在 ConnectNamedPipe 等待 APO 连接，
+    // 注意：须**避开** join 服务端线程：它阻塞在 ConnectNamedPipe 等待 APO 连接，
     // 主线程 CloseHandle 无法可靠唤醒该等待；进程在 main 返回时结束所有线程，
     // 直接放行即可（阻塞线程不会阻止 Rust 进程退出）。
     Ok(report)

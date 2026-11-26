@@ -7,7 +7,7 @@ use crate::knowledge::{
 
 /// 单设备状态详情（交互菜单 [s] 用）：只显示指定设备的槽位 + 子 APO 信息。
 ///
-/// 与 `list_devices` 不同——本函数聚焦单个设备，并展示 childApo 信息区
+/// 与 `list_devices` 不同：本函数聚焦单个设备，并展示 childApo 信息区
 /// （PreMixChild/PostMixChild，运行期委托给谁）。
 pub fn show_device_status(device_ref: &str) -> Result<(), String> {
     // 单次全量枚举：resolve（可能按序号定位）与配对查找共用同一份列表
@@ -153,8 +153,8 @@ pub fn list_devices(json: bool) -> Result<(), String> {
         }
     })?;
     if json {
-        // 输出契约见 `vxapo_protocol::Device`（App 侧类型由同一 crate 生成，不再手写拼接）。
-        // 格式与流向一律取自 driver 枚举（决策 6）：`DeviceInfo.format` + `EndpointInfo.flow`。
+        // 输出契约见 `vxapo_protocol::Device`（App 侧类型由同一 crate 生成）。
+        // 格式与流向一律取自 driver 枚举：`DeviceInfo.format` + `EndpointInfo.flow`。
         // 原实现会另扫一遍 MMDevices 注册表（`probe::probe_all`）再按 GUID 拼回，
         // 现已删除；两条路径的口径对齐由 driver `format.rs` 的解析单测锁定。
         let volume_map = endpoint_volume_map();

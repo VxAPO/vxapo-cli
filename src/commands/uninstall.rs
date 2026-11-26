@@ -25,10 +25,10 @@ pub fn uninstall(device_ref: &str, json: bool) -> Result<(), String> {
     // 卸载前先让 audiodg 退出：**不是为了"能删槽位值"**（写/删 FxProperties 值只需
     // KEY_SET_VALUE 句柄，音频播放中、DLL 已被 audiodg 加载、audiodg 持有点端的
     // 情况下，槽位值照样删成功）。真正的理由是：
-    // ① 释放模块映像——taskkill 后 audiodg 才会卸载 vxapo_driver.dll，
+    // ① 释放模块映像：taskkill 后 audiodg 才会卸载 vxapo_driver.dll，
     //    否则紧随其后的重装/换 DLL 会因文件被占用而覆盖失败（NSIS 的
     //    installer-hooks.nsh 同样为此在安装/卸载前停服务）；
-    // ② 让端点图重建（pnputil /restart-device）立刻生效——引擎会缓存端点 APO 链，
+    // ② 让端点图重建（pnputil /restart-device）立刻生效：引擎会缓存端点 APO 链，
     //    只改注册表的话新起的流仍加载旧 APO。
     // 停服走 driver 的 SCM 封装（30s 超时，不会挂死；服务未跑时也安全），
     // 随后按事件等待 audiodg 退出。
@@ -41,7 +41,7 @@ pub fn uninstall(device_ref: &str, json: bool) -> Result<(), String> {
     }
     let _ = vxapo_driver::stop_audio_service();
     // 事件驱动等待：对 audiodg 进程句柄 WaitForSingleObject，进程一退出立即返回
-    // （上限 5 s，超时也继续——槽位值的写/删不依赖它，只有"换 DLL 前释放模块映像"依赖）。
+    // （上限 5 s，超时也继续：槽位值的写/删与其无关，只有"换 DLL 前释放模块映像"依赖）。
     let wait_start = std::time::Instant::now();
     let exited = vxapo_driver::wait_for_audiodg_exit(5000);
     if !json {
@@ -113,7 +113,7 @@ pub fn uninstall(device_ref: &str, json: bool) -> Result<(), String> {
         }
     }
 
-    // 卸载收尾对齐安装：不整服重启（避免二次打断）——
+    // 卸载收尾对齐安装：保持整服重启（避免二次打断），
     // uninstall_endpoint 已定向重启该端点设备并 ensure AudioSrv 运行。
 
     if json {

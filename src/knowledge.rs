@@ -235,7 +235,7 @@ pub fn normalize_clsid(clsid: &str) -> String {
 
 /// EAPO 槽位判定用 GUID 常量（与 [`KNOWN_APO_CLSIDS`] 的两个 EAPO key 同源）。
 ///
-/// `detect_eapo_status` 直接比较 GUID，不再对每个槽位做
+/// `detect_eapo_status` 直接比较 GUID，省去对每个槽位做
 /// `format! + to_lowercase + replace` 字符串归一化。
 /// 构造方式与 driver `sys/consts.rs` 的 CLSID 常量一致（const fn，无宏依赖）。
 pub const EAPO_PRE_MIX_CLSID: windows::core::GUID = windows::core::GUID::from_values(

@@ -7,7 +7,7 @@
 //! TS_RS_EXPORT_DIR=../../vxapo-app/src/lib/generated cargo test -p vxapo-protocol export_bindings
 //! ```
 //!
-//! App 的 `model.ts` / `api.ts` 直接 re-export 生成类型，不再维护第二份手写定义。
+//! App 的 `model.ts` / `api.ts` 直接 re-export 生成类型，省去第二份手写定义。
 //! 字段名与 serde 输出即 CLI 的 `--json` 契约，改动此处即改契约。
 
 use serde::{Deserialize, Serialize};
@@ -389,7 +389,7 @@ pub struct StaleInstall {
     pub target_guid: Option<String>,
     pub target_name: Option<String>,
     pub target_state: StaleTargetState,
-    /// 可自动修复（App 启动时无需询问即可执行 `stale migrate`）：
+    /// 可自动修复（App 启动时直接执行 `stale migrate`）：
     /// 目标唯一命中 + 旧记录配置有意义 + 目标目录没有有意义的配置。
     /// 判据由 driver 给出（单一事实源）；false 时交横幅由用户决定。
     pub auto_repairable: bool,

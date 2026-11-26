@@ -203,7 +203,7 @@ pub(super) fn run_config(args: &[String]) -> Result<(), String> {
 
 /// snapshot 子命令：`snapshot diff -d <device>` / `snapshot restore -d <device>`。
 ///
-/// `<device>` 支持 `{GUID}` 或枚举序号（与 install/uninstall 一致——序号先
+/// `<device>` 支持 `{GUID}` 或枚举序号（与 install/uninstall 一致：序号先
 /// resolve_device 转 GUID；`{GUID}` 原样传给底层）。
 pub(super) fn run_snapshot(args: &[String]) -> Result<(), String> {
     let sub = args.first().map(|s| s.as_str()).unwrap_or("");
