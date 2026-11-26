@@ -39,7 +39,7 @@ pub fn preview_install(device_ref: &str) -> Result<String, String> {
     Ok(lines.join("\n"))
 }
 
-/// install 命令（CLI 引用规范 5.1）。
+/// install 命令。
 pub fn install(
     device_ref: &str,
     mode: Option<&str>,

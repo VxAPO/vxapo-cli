@@ -20,7 +20,7 @@ use vxapo_protocol::{
 use crate::i18n::{Lang, lang, tr};
 use crate::verify::emit_phase;
 
-/// 设备三元组（resolve_device 产物，CLI 引用规范 4.4.1）。
+/// 设备三元组（resolve_device 产物）。
 pub struct DeviceRef {
     pub guid: String,
     pub name: String,

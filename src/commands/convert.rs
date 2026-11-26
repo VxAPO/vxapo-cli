@@ -2,7 +2,7 @@
 
 use super::*;
 
-/// config set（CLI 引用规范 5.2）：源文件内容原样写入 per-device config.toml。
+/// config set：源文件内容原样写入 per-device config.toml。
 pub fn config_set(device_ref: &str, file: &str) -> Result<(), String> {
     let dev = resolve_device(device_ref)?;
     let src = std::fs::read_to_string(file).map_err(|e| {
@@ -41,7 +41,7 @@ pub fn config_set(device_ref: &str, file: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// config show：读回 + ConfigParser 语法验证（CLI 引用规范 5.2）。
+/// config show：读回 + ConfigParser 语法验证。
 pub fn config_show(device_ref: &str) -> Result<(), String> {
     let dev = resolve_device(device_ref)?;
     let path = device_config_path(&dev.guid);
@@ -358,7 +358,7 @@ mod tests {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// 快照 = 变更对比 + 基线保持（CLI 引用规范 5.3）
+// 快照 = 变更对比 + 基线保持
 // ══════════════════════════════════════════════════════════════════════════════
 
 #[cfg(test)]

@@ -143,7 +143,7 @@ pub(super) fn endpoint_volume_map() -> std::collections::HashMap<String, f32> {
     map
 }
 
-/// 打印设备列表 + 槽位占用（包含 4.5 友好名 + 槽位失守标注，CLI 引用规范 5.2 status/list）。
+/// 打印设备列表 + 槽位占用（含友好名与槽位失守标注）。
 pub fn list_devices(json: bool) -> Result<(), String> {
     let devices = enumerate_devices().map_err(|e| {
         if lang() == Lang::En {
@@ -270,7 +270,7 @@ pub fn list_devices(json: bool) -> Result<(), String> {
     Ok(())
 }
 
-/// 检测安装模式槽位是否失守（CLI 引用规范 5.2 +）。
+/// 检测安装模式槽位是否失守。
 pub(super) fn detect_lost_slot(
     slots: &[vxapo_driver::SlotValue; 5],
     mode: vxapo_driver::InstallMode,

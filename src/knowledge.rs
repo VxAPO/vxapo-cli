@@ -188,7 +188,7 @@ pub static KNOWN_PROPERTIES: LazyLock<HashMap<&'static str, PropertyMeta>> = Laz
     m
 });
 
-/// APO CLSID → 友好名映射（CLI 引用规范 4.5：EAPO/VxAPO pre/postmix 实读源码确认）。
+/// APO CLSID → 友好名映射（EAPO/VxAPO pre/postmix 由实读源码确认）。
 ///
 /// key 为 `{xxxxxxxx-...}` 小写带花括号（与 `slot_friendly` 的规范化输入一致）。
 /// VxAPO 两个 key 由 driver 常量生成，避免字面量再次漂移；EAPO 的 CLSID 不属 VxAPO，

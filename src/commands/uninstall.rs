@@ -3,7 +3,7 @@
 use super::snapshot::*;
 use super::*;
 
-/// uninstall 命令（CLI 引用规范 5.3）。
+/// uninstall 命令。
 pub fn uninstall(device_ref: &str, json: bool) -> Result<(), String> {
     require_admin()?;
     let dev = resolve_device(device_ref)?;
